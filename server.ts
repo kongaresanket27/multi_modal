@@ -311,7 +311,8 @@ app.post('/api/grade-answer', async (req, res) => {
     }
 
     const prompt = `Question: "${question.question}"
-Correct Answer / Worked Solution: "${question.worked_solution}"
+Correct answer: "${question.correct_answer}"
+Worked solution: "${question.worked_solution}"
 Course source: ${question.source_file || 'Unknown source'} (${question.source_location || 'Unknown location'})
 Student Answer: "${userAnswer}"
 
@@ -332,7 +333,14 @@ Grade the student answer on a scale from 0.0 to 1.0 (with partial credit). Use o
     });
 
     const result = JSON.parse(response.text || '{}');
-    res.json(result);
+    const partialScore = Number(result.partialScore);
+    if (!Number.isFinite(partialScore)) return res.status(502).json({ error: 'The grader returned an invalid score.' });
+    const safeScore = Math.max(0, Math.min(1, partialScore));
+    res.json({
+      isCorrect: safeScore >= 0.7,
+      partialScore: safeScore,
+      feedback: String(result.feedback || 'Review the cited worked solution.').slice(0, 1200),
+    });
   } catch (err: any) {
     console.error('Grading Error:', err);
     res.status(500).json({ error: err.message || 'Error grading answer' });
