@@ -11,25 +11,17 @@ Students frequently study from fragmented materials—YouTube lecture videos, de
 
 **StudyPilot** is an end-to-end, source-grounded academic companion that:
 1. **Multimodal Ingestion (Zero Preprocessing):** Ingests PDFs, slide decks, lecture videos, and YouTube URLs. Extracts textual excerpts, mathematical formulas, and visual diagrams (contour loss plots, convolution sliding kernels, transformer attention blocks) into structured content units linked to exact page numbers, slide IDs, and video timestamps.
-2. **Strict Source Grounding:** Every factual claim in the AI tutor includes inline citation chips `[1]`, `[2]`. Clicking any chip opens an interactive Source Viewer slide-over drawer with the highlighted excerpt, provenance metadata, and synchronized video seek player.
+2. **Strict Source Grounding:** The tutor is instructed to cite retrieved excerpts using `[1]`, `[2]` source markers. The Source Viewer displays the retrieved excerpt and opens session-local PDFs at cited pages, uploaded videos at cited timestamps, and YouTube videos at caption timestamps when available.
 3. **Out-of-Material Refusal:** Queries outside the course syllabus are flagged with an amber refusal banner, refusing hallucinated blends and strictly isolating unverified outside knowledge.
-4. **Adaptive Assessment & Dual-Pass Verification:** Generates MCQs, short answers, and numerical problems. Newly generated questions undergo an automated second-pass solve without the answer key; discrepancies are dropped. Employs past question hashing to guarantee **0% question repetition**.
+4. **Adaptive Assessment & Dual-Pass Verification:** Generates MCQs, short answers, and numerical problems. Newly generated questions undergo an automated second-pass solve without the answer key; discrepancies are dropped. Hashes normalized question text and rejects exact normalized repeats from completed assessments; semantically similar rewordings may still require review.
 5. **Bayesian Knowledge Tracing (BKT) Learner Model:** Implements the classic Corbett & Anderson 4-parameter probabilistic model ($P(L_0), P(T), P(G), P(S)$) combined with Ebbinghaus memory stability decay curves ($R(t) = \exp(-t/S)$) to schedule reviews before forgetting occurs.
 6. **System Evaluation & Benchmarking:** The evaluation dashboard lists RAGAS-style metrics and target thresholds, but **no benchmark results are currently claimed**. Scores remain “Not measured” until a labeled test set is run and reproducible results are recorded. The dashboard can run a deterministic synthetic BKT learner simulation; those outcomes are illustrative simulations, not evidence from real students.
 
 ---
 
-## 🚀 Live Demo Mode
+## First Run
 
-StudyPilot includes a built-in **"Demo Course"** button in the top bar that instantly populates:
-- **Stanford / MIT CS229: Deep Learning & Neural Architectures**
-- A preloaded illustrative sample course for exploring the UI (not a verified external-source corpus)
-- Example topics, content units, and prerequisite edges for demonstration
-- Example learner progress and quiz history to preview dashboard behavior
-
-**Important:** demo citations and learner histories are illustrative. Upload real course sources before relying on citations or reporting academic evaluation results.
-
----
+StudyPilot starts with an empty course and no synthetic quiz history or mastery scores. Upload your own course sources first. This avoids displaying illustrative citations or invented learner progress as if they were real. The first assessment is labeled as a diagnostic baseline for the new learner.
 
 ## 🛠️ Architecture Overview
 
@@ -102,9 +94,9 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 - The ingestion screen now sends selected files to `POST /api/ingest`; it no longer invents progress logs or fixed extraction counts.
 - PDF and image content is sent to the server-side Gemini model. PPTX slide text is extracted from the presentation XML, and embedded slide images are also passed for visual interpretation. MP4/MOV files are passed to Gemini when under the inline upload limit.
-- Each file is limited to 18 MB and batches support up to 8 files. The Express JSON body limit is 50 MB, so keep combined uploads comfortably below that limit.
+- Each file is limited to 18 MB and each batch to 8 files / 32 MB combined raw file size. YouTube batches are limited to 5 URLs. The Express JSON body limit is 50 MB.
 - YouTube ingestion attempts to retrieve an English caption track. If no captions are available, the system warns and does not fabricate transcript-based units; upload a transcript or video file instead.
-- Ingestion output is accepted only when its source filename/URL matches a readable source supplied in that request. Page/slide/timestamp values are still model-extracted metadata and should be checked against the original material before high-stakes use.
+- Ingestion output is accepted only when its source filename/URL matches a readable source supplied in that request. PDF page numbers are checked against a detected page count when available; PPTX slide numbers are checked against the slide archive; text citations are checked against line counts; YouTube timestamps are snapped to retrieved caption timestamps. Video timestamps are syntax-checked but not checked against the uploaded video's exact duration. Always review source excerpts before high-stakes use.
 - Quiz generation uses selected course excerpts and independently re-solves generated questions in a second model pass without providing the proposed answer key. Questions that fail source or answer checks are dropped. Stable question IDs help prevent repeats across subsequent generated assessments.
 - Tutor responses refuse when retrieval finds no sufficiently relevant excerpt. If the AI service is unavailable, the fallback displays retrieved excerpts instead of inventing an explanation.
 
@@ -119,7 +111,23 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Evaluation status
 
-The current repository does **not** contain a completed, labeled RAGAS/DeepEval/TruLens evaluation run. The dashboard intentionally displays “Not measured” for faithfulness, answer relevancy, context precision, context recall, and refusal rate instead of presenting unverified percentages. Before submission, create a labeled test set with source locations and off-material questions, run the evaluation, and record the method, sample size, and actual results here.
+The repository includes a small **self-authored labeled fixture corpus** with four in-scope questions and two off-material questions. It is a reproducible smoke-test fixture, not a substitute for evaluation on your actual uploaded course corpus.
+
+Run the deterministic retrieval/refusal benchmark:
+
+```bash
+npm run evaluate:retrieval
+```
+
+For RAGAS generation metrics, start the StudyPilot server with `GEMINI_API_KEY` configured, then run:
+
+```bash
+npm run evaluate:ragas:collect
+python -m pip install -r evaluation/requirements.txt
+python evaluation/run_ragas.py
+```
+
+The RAGAS runner records faithfulness, answer relevancy, context precision, and context recall for the included labeled fixture. Results are written to ignored local JSON files under `evaluation/`. The app dashboard deliberately continues to show “Not measured” until a benchmark result is explicitly imported/recorded; running a script does not automatically prove performance on a user's own course material. For submission, run the same evaluation with a larger labeled test set derived from the actual course sources and preserve the generated result files as evidence.
 
 ## Hackathon submission checklist
 
