@@ -4,7 +4,7 @@
  * Adaptive Quizzes, and Source-Grounded Tutoring.
  */
 
-export type SourceType = 'pdf' | 'slide' | 'video' | 'youtube';
+export type SourceType = 'pdf' | 'slide' | 'video' | 'youtube' | 'text';
 
 export interface ContentUnit {
   id: string;
