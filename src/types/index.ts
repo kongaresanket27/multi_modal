@@ -143,6 +143,7 @@ export interface QuizSubmission {
   total_questions: number;
   correct_questions: number;
   topic_ids: string[];
+  question_ids?: string[];
   answers: {
     question_id: string;
     topic_id?: string;
