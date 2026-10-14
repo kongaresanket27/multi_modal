@@ -151,53 +151,13 @@ export async function gradeOpenEndedAnswer(
   };
 }
 
-// RAGAS Framework Benchmark Metrics
+// Benchmark values intentionally remain unreported until a reproducible evaluation run is performed.
 export const BENCHMARK_EVALUATION_METRICS: EvaluationMetric[] = [
-  {
-    metric_name: 'Faithfulness (RAGAS)',
-    description: 'Percentage of claims in generated tutor explanations that are mathematically and conceptually substantiated by retrieved course excerpts.',
-    score: 0.964,
-    benchmark_target: 0.90,
-    status: 'exceeds',
-    sample_size: 150,
-    methodology: 'Evaluated against 150 ground-truth Stanford CS229 lecture excerpts using claim-level NLI verification.',
-  },
-  {
-    metric_name: 'Answer Relevancy',
-    description: 'Semantic cosine similarity between generated responses and student exam queries, penalizing irrelevant digressions.',
-    score: 0.942,
-    benchmark_target: 0.88,
-    status: 'exceeds',
-    sample_size: 150,
-    methodology: 'Cross-encoder embedding similarity across varying student difficulty prompts.',
-  },
-  {
-    metric_name: 'Context Precision',
-    description: 'Signal-to-noise ratio in top-k retrieval: measures whether the exact relevant slide/page appears at rank 1.',
-    score: 0.928,
-    benchmark_target: 0.85,
-    status: 'exceeds',
-    sample_size: 150,
-    methodology: 'Mean Reciprocal Rank (MRR@3) on team-built benchmark test set of 150 course queries.',
-  },
-  {
-    metric_name: 'Context Recall',
-    description: 'Completeness of retrieved units covering all prerequisite concepts required to solve complex exam questions.',
-    score: 0.951,
-    benchmark_target: 0.90,
-    status: 'exceeds',
-    sample_size: 150,
-    methodology: 'Recall against gold standard multi-hop prerequisite dependencies.',
-  },
-  {
-    metric_name: 'Out-of-Material Refusal Rate',
-    description: 'Correct detection and rejection of queries not covered in syllabus (e.g. general trivia, off-topic fields).',
-    score: 1.000,
-    benchmark_target: 0.95,
-    status: 'exceeds',
-    sample_size: 50,
-    methodology: 'Tested with 50 adversarial out-of-domain queries (Quantum Chemistry, World History, Cooking).',
-  },
+  { metric_name: 'Faithfulness (RAGAS)', description: 'Measures whether generated claims are supported by retrieved excerpts.', score: 0, benchmark_target: 0.90, status: 'below', sample_size: 0, methodology: 'Not measured yet. Run a documented benchmark against a labeled source-grounded test set before reporting a score.' },
+  { metric_name: 'Answer Relevancy', description: 'Measures whether answers address the learner question.', score: 0, benchmark_target: 0.88, status: 'below', sample_size: 0, methodology: 'Not measured yet. No reproducible evaluation run is recorded in this repository.' },
+  { metric_name: 'Context Precision', description: 'Measures whether retrieved excerpts are relevant to the question.', score: 0, benchmark_target: 0.85, status: 'below', sample_size: 0, methodology: 'Not measured yet. Create a labeled query-to-source benchmark and evaluate retrieval rankings.' },
+  { metric_name: 'Context Recall', description: 'Measures whether the retrieved context contains the evidence needed to answer.', score: 0, benchmark_target: 0.90, status: 'below', sample_size: 0, methodology: 'Not measured yet. Requires gold-standard evidence annotations for benchmark questions.' },
+  { metric_name: 'Out-of-Material Refusal Rate', description: 'Measures correct refusal on questions not covered by the active course sources.', score: 0, benchmark_target: 0.95, status: 'below', sample_size: 0, methodology: 'Not measured yet. Evaluate with a labeled set of in-scope and out-of-scope queries.' },
 ];
 
 // Simulated Multi-Session Student Cohorts
