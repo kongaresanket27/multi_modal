@@ -25,12 +25,16 @@ jobs:
         run: npm run lint
       - name: Run deterministic retrieval and refusal benchmark
         run: npm run evaluate:retrieval
+      - name: Run multi-session simulated learner evaluation
+        run: npm run evaluate:personalization
       - name: Build production frontend
         run: npm run build
       - name: Upload retrieval benchmark results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: retrieval-benchmark-results
-          path: evaluation/retrieval-benchmark-results.json
+          name: studypilot-evaluation-results
+          path: |
+            evaluation/retrieval-benchmark-results.json
+            evaluation/simulated-student-results.json
           if-no-files-found: ignore
