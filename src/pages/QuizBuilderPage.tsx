@@ -23,12 +23,14 @@ interface QuizBuilderPageProps {
   store: ReturnType<typeof useAppStore>;
   onStartQuiz: (questions: Question[], quizTitle: string, isTimed: boolean) => void;
   initialTopicId?: string;
+  onNavigateToIngestion: () => void;
 }
 
 export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
   store,
   onStartQuiz,
   initialTopicId,
+  onNavigateToIngestion,
 }) => {
   const { course, topicMastery, quizHistory, learnerProfile } = store;
   const isDiagnostic = !learnerProfile.diagnostic_completed;
@@ -48,6 +50,19 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
   quizHistory.forEach(q => {
     q.answers.forEach(a => pastAnsweredQuestionIds.add(a.question_id));
   });
+
+  if (!course.content_units.length || !course.topics.length) {
+    return (
+      <div className="p-6 md:p-8 max-w-4xl mx-auto">
+        <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center space-y-3">
+          <BookOpen className="w-8 h-8 mx-auto text-indigo-500" />
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Assessments need course material</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400">Upload a textbook, slide deck, or lecture first. Questions will be generated from those excerpts and independently checked before they are shown.</p>
+          <button type="button" onClick={onNavigateToIngestion} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Upload course material</button>
+        </div>
+      </div>
+    );
+  }
 
   const toggleTopic = (id: string) => {
     setSelectedTopicIds(prev =>
