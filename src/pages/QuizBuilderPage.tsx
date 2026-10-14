@@ -30,7 +30,8 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
   onStartQuiz,
   initialTopicId,
 }) => {
-  const { course, topicMastery, quizHistory } = store;
+  const { course, topicMastery, quizHistory, learnerProfile } = store;
+  const isDiagnostic = !learnerProfile.diagnostic_completed;
 
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(
     initialTopicId ? [initialTopicId] : []
@@ -79,7 +80,9 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
         selectedTypes
       );
 
-      const title = selectedTopicIds.length === 1
+      const title = isDiagnostic
+        ? 'Initial Diagnostic Assessment'
+        : selectedTopicIds.length === 1
         ? `${course.topics.find(t => t.id === selectedTopicIds[0])?.title} Quiz`
         : isTimedExam
         ? `${course.code} Timed Mock Examination`
@@ -111,8 +114,13 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
           Adaptive Assessment Generator
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Generate custom quizzes and timed mock exams with automatic verification, zero-repeat anti-duplication, and cited feedback.
+          Generate custom quizzes and timed mock exams with independent answer checks, repeat prevention, and source-cited feedback.
         </p>
+        {isDiagnostic && (
+          <div className="mt-4 p-3 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/30 text-xs text-indigo-800 dark:text-indigo-200">
+            <strong>First-session diagnostic:</strong> your first assessment establishes a baseline for each selected topic. Topic mastery updates after you submit your answers.
+          </div>
+        )}
       </div>
 
       {generationError && <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">{generationError}</div>}
