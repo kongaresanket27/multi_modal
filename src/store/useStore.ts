@@ -184,19 +184,25 @@ export function useAppStore() {
         const accuracyInfo = submission.topic_accuracies[state.topic_id];
         if (!accuracyInfo || accuracyInfo.total === 0) return state;
 
-        // Apply BKT updates for each question in this topic
+        // Prefer the actual ordered answer sequence for this topic. Older submissions
+        // without per-answer topic IDs fall back to their aggregate topic accuracy.
         let currentM = state.mastery;
         let stability = state.stability_days;
         const now = Date.now();
-
-        // Fraction of correct answers
+        const topicAnswers = submission.answers.filter(answer => answer.topic_id === state.topic_id);
         const isOverallTopicPassed = accuracyInfo.percentage >= 65;
 
-        // Step through BKT for each question
-        for (let i = 0; i < accuracyInfo.total; i++) {
-          const isQCorrect = i < accuracyInfo.correct;
-          const bktResult = updateBKT(currentM, isQCorrect);
-          currentM = bktResult.newMastery;
+        if (topicAnswers.length) {
+          for (const answer of topicAnswers) {
+            const bktResult = updateBKT(currentM, answer.is_correct);
+            currentM = bktResult.newMastery;
+          }
+        } else {
+          for (let i = 0; i < accuracyInfo.total; i++) {
+            const isQCorrect = i < accuracyInfo.correct;
+            const bktResult = updateBKT(currentM, isQCorrect);
+            currentM = bktResult.newMastery;
+          }
         }
 
         // Update Ebbinghaus stability
