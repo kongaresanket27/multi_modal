@@ -388,6 +388,7 @@ app.post('/api/ingest', async (req, res) => {
     const units = Array.isArray(parsed.units) ? parsed.units : [];
     const warnings = [...ingestionWarnings, ...(Array.isArray(parsed.warnings) ? parsed.warnings.map(String) : [])];
     if (!units.length) return res.status(422).json({ error: 'No grounded content units could be extracted from these sources.', warnings });
+    if (!topics.length) return res.status(422).json({ error: 'No course topics could be identified. Try a source with more readable content.', warnings });
 
     const ingestionId = Date.now().toString(36);
     const topicIdMap = new Map<string, string>();
