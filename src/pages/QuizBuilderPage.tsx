@@ -92,7 +92,8 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
         difficulty,
         pastAnsweredQuestionIds,
         course.content_units,
-        selectedTypes
+        selectedTypes,
+        topicMastery
       );
 
       const title = isDiagnostic
@@ -221,7 +222,41 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
           </div>
         </div>
 
-        {/* Step 3: Question Count & Mode */}
+  
+      {/* Question types */}
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">Question Types</h3>
+          <p className="text-[11px] text-slate-500 mt-1">Choose one or more formats. At least one must remain selected.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {[
+            { id: 'mcq', label: 'Multiple choice', detail: 'Four options, one answer' },
+            { id: 'short_answer', label: 'Short answer', detail: 'Explain a concept' },
+            { id: 'numerical', label: 'Numerical', detail: 'Calculate from source methods' },
+          ].map(type => {
+            const selected = selectedTypes.includes(type.id as QuestionType);
+            return (
+              <button
+                key={type.id}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setSelectedTypes(previous => {
+                  const value = type.id as QuestionType;
+                  if (previous.includes(value)) return previous.length > 1 ? previous.filter(item => item !== value) : previous;
+                  return [...previous, value];
+                })}
+                className={selected ? 'p-3 rounded-xl border border-indigo-500 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 text-left transition-colors' : 'p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 text-left transition-colors'}
+              >
+                <span className="block text-xs font-bold">{type.label}</span>
+                <span className="block text-[10px] mt-1">{type.detail}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Step 3: Question Count & Mode */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-slate-100 dark:border-slate-800">
           {/* Question Count */}
           <div className="space-y-2">
@@ -275,14 +310,14 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
           </div>
         </div>
 
-        {/* Verification Guarantee & Anti-Repeat Status */}
+        {/* Verification & repeat checks */}
         <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-xs flex items-center justify-between text-slate-600 dark:text-slate-400">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <span>Dual-pass solver verification active</span>
+            <span>Independent second-pass answer check enabled</span>
           </div>
           <span className="font-mono text-[11px] text-slate-500">
-            0% repetition rate ({pastAnsweredQuestionIds.size} logged past items)
+            {pastAnsweredQuestionIds.size} previously answered question IDs tracked; reworded duplicates may remain
           </span>
         </div>
 
