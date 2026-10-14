@@ -195,7 +195,11 @@ app.post('/api/chat', async (req, res) => {
     });
   } catch (err: any) {
     console.error('Chat API Error:', err);
-    res.status(500).json({ error: err.message || 'Er// Adaptive Quiz Generation Endpoint with independent second-pass verification
+    res.status(500).json({ error: err.message || 'Error generating chat response' });
+  }
+});
+
+// Adaptive Quiz Generation Endpoint with independent second-pass verification
 app.post('/api/generate-quiz', async (req, res) => {
   try {
     const { topicIds = [], count = 5, difficulty = 'medium', pastQuestionIds = [], sourceUnits = [], questionTypes = ['mcq', 'short_answer', 'numerical'] } = req.body;
