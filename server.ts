@@ -14,6 +14,71 @@ import { createHash } from 'node:crypto';
 
 dotenv.config();
 
+interface SourceLocationMetadata {
+  type: 'pdf' | 'pptx' | 'image' | 'video' | 'text' | 'youtube';
+  pageCount?: number;
+  slideNumbers?: Set<number>;
+  lineCount?: number;
+  captionTimes?: number[];
+}
+
+function parseTimestampSeconds(value: string): number | null {
+  const match = value.match(/(?:^|\b)((?:\d{1,2}:)?\d{1,2}:\d{2})(?:\b|$)/);
+  if (!match) return null;
+  const parts = match[1].split(':').map(Number);
+  if (parts.some(part => !Number.isFinite(part))) return null;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return null;
+}
+
+function formatTimestampSeconds(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const remainder = safe % 60;
+  return hours > 0
+    ? String(hours) + ':' + String(minutes).padStart(2, '0') + ':' + String(remainder).padStart(2, '0')
+    : String(minutes) + ':' + String(remainder).padStart(2, '0');
+}
+
+function normalizeSourceLocation(sourceFile: string, sourceType: string, rawLocation: string, metadata?: SourceLocationMetadata): string | null {
+  if (metadata?.type === 'pdf' || sourceType === 'pdf') {
+    const page = rawLocation.match(/\bpage\s*#?\s*(\d+)\b/i)?.[1];
+    const pageNumber = Number(page);
+    if (!page || pageNumber < 1 || (metadata?.pageCount && pageNumber > metadata.pageCount)) return null;
+    return 'Page ' + pageNumber;
+  }
+  if (metadata?.type === 'pptx' || (/\.pptx$/i.test(sourceFile) && sourceType === 'slide')) {
+    const slide = rawLocation.match(/\bslide\s*#?\s*(\d+)\b/i)?.[1];
+    const slideNumber = Number(slide);
+    if (!slide || !metadata?.slideNumbers?.has(slideNumber)) return null;
+    return 'Slide ' + slideNumber;
+  }
+  if (metadata?.type === 'image' || (/\.(png|jpe?g|webp)$/i.test(sourceFile) && sourceType === 'slide')) return 'Image 1';
+  if (metadata?.type === 'text' || sourceType === 'text') {
+    const match = rawLocation.match(/\blines?\s*(\d+)(?:\s*[-–]\s*(\d+))?\b/i);
+    if (!match) return null;
+    const first = Number(match[1]), last = Number(match[2] || match[1]);
+    if (first < 1 || last < first || (metadata?.lineCount && last > metadata.lineCount)) return null;
+    return first === last ? 'Line ' + first : 'Lines ' + first + '-' + last;
+  }
+  if (metadata?.type === 'youtube' || sourceType === 'youtube') {
+    const seconds = parseTimestampSeconds(rawLocation);
+    const captionTimes = metadata?.captionTimes || [];
+    if (seconds === null || !captionTimes.length) return null;
+    const nearest = captionTimes.reduce((best, candidate) => Math.abs(candidate - seconds) < Math.abs(best - seconds) ? candidate : best, captionTimes[0]);
+    if (Math.abs(nearest - seconds) > 90) return null;
+    return formatTimestampSeconds(nearest);
+  }
+  if (metadata?.type === 'video' || sourceType === 'video') {
+    const seconds = parseTimestampSeconds(rawLocation);
+    return seconds === null ? null : formatTimestampSeconds(seconds);
+  }
+  return null;
+}
+
+
 function readZipEntries(input: Buffer): Map<string, Buffer> {
   const entries = new Map<string, Buffer>();
   const minOffset = Math.max(0, input.length - 65557);
@@ -289,6 +354,7 @@ app.post('/api/ingest', async (req, res) => {
     const parts: any[] = [];
     const sourceNames: string[] = [];
     const sourceTypes = new Map<string, string>();
+    const sourceMetadata = new Map<string, SourceLocationMetadata>();
     const ingestionWarnings: string[] = [];
     for (const file of files) {
       if (!file?.name || !file?.mimeType || !file?.data) return res.status(400).json({ error: 'A file is missing its name, MIME type, or content.' });
@@ -342,13 +408,23 @@ app.post('/api/ingest', async (req, res) => {
             parts.push({ inlineData: { mimeType: imageMime, data: mediaBytes.toString('base64') } });
           }
         }
+        sourceMetadata.set(name, { type: 'pptx', slideNumbers });
         if (!slidePaths.length) ingestionWarnings.push('No slide XML files were found in ' + name + '.');
       } else if (mimeType === 'application/pdf' || mimeType.startsWith('image/') || mimeType.startsWith('video/')) {
+        if (mimeType === 'application/pdf') {
+          const pageCount = [...bytes.toString('latin1').matchAll(/\/Type\s*\/Page\b/g)].length;
+          sourceMetadata.set(name, { type: 'pdf', pageCount });
+          if (!pageCount) ingestionWarnings.push('PDF page count could not be independently confirmed for ' + name + '. Page citations will be checked for valid numbering but should be reviewed.');
+        } else if (mimeType.startsWith('image/')) sourceMetadata.set(name, { type: 'image' });
+        else sourceMetadata.set(name, { type: 'video' });
         if (mimeType.startsWith('video/') && bytes.length > 18 * 1024 * 1024) return res.status(413).json({ error: 'Video is too large for inline processing: ' + name });
         parts.push({ text: 'Analyze source file "' + name + '". Only report page, figure, slide, or timestamp locations supported by the supplied content.' });
         parts.push({ inlineData: { mimeType, data: bytes.toString('base64') } });
       } else if (mimeType.startsWith('text/')) {
-        parts.push({ text: 'Source file "' + name + '":\n' + bytes.toString('utf8').slice(0, 120000) });
+        const textContent = bytes.toString('utf8').slice(0, 120000);
+        const lineCount = textContent.split(/\r?\n/).length;
+        sourceMetadata.set(name, { type: 'text', lineCount });
+        parts.push({ text: 'Source file "' + name + '". Cite exact line ranges in this text:\n' + textContent.split(/\r?\n/).map((line, index) => '[' + (index + 1) + '] ' + line).join('\n') });
       } else {
         return res.status(415).json({ error: 'Unsupported file type: ' + name + '. Use PDF, PPTX, MP4/MOV, PNG/JPG, or text files.' });
       }
@@ -374,6 +450,7 @@ app.post('/api/ingest', async (req, res) => {
               return '[' + stamp + '] ' + text;
             }).join('\n');
             if (transcript.trim()) {
+              sourceMetadata.set(url, { type: 'youtube', captionTimes: entries.map(match => Number(match[1])).filter(seconds => Number.isFinite(seconds) && seconds >= 0) });
               parts.push({ text: 'Actual English caption transcript for YouTube video ' + url + '. Timestamps come from the caption track.\n' + transcript.slice(0, 100000) });
               transcriptAdded = true;
             }
@@ -419,6 +496,13 @@ app.post('/api/ingest', async (req, res) => {
     }));
     const topicNames = new Map(safeTopics.map((t: any) => [t.id, t.title]));
     const safeUnits = units.filter((u: any) => sourceTypes.has(String(u.source_file || ''))).map((u: any, i: number) => {
+      const sourceFile = String(u.source_file || '');
+      const sourceType = sourceTypes.get(sourceFile) || 'pdf';
+      const sourceLocation = normalizeSourceLocation(sourceFile, sourceType, String(u.source_location || ''), sourceMetadata.get(sourceFile));
+      if (!sourceLocation) {
+        ingestionWarnings.push('Skipped a content unit from ' + sourceFile + ' because its page, slide, line, or timestamp could not be validated.');
+        return null;
+      }
       const topicId = topicIdMap.get(String(u.topic_id || '')) || safeTopics[0]?.id || 'ingested-topic';
       const unit: any = {
         id: 'ingested-unit-' + ingestionId + '-' + (i + 1),
@@ -426,26 +510,22 @@ app.post('/api/ingest', async (req, res) => {
         summary: String(u.summary || ''),
         full_text_excerpt: String(u.full_text_excerpt || ''),
         topic_id: topicId,
-        topic_name: String(u.topic_name || topicNames.get(topicId) || 'Course material'),
+        topic_name: String(topicNames.get(topicId) || u.topic_name || 'Course material'),
         subtopic: String(u.subtopic || ''),
         concept_tags: Array.isArray(u.concept_tags) ? u.concept_tags.map(String) : [],
         difficulty: ['easy', 'medium', 'hard'].includes(u.difficulty) ? u.difficulty : 'medium',
-        source_type: sourceTypes.get(String(u.source_file || '')) || 'pdf',
-        source_file: String(u.source_file),
-        source_location: String(u.source_location || 'Location not identified'),
+        source_type: sourceType,
+        source_file: sourceFile,
+        source_location: sourceLocation,
       };
-      if (Number.isFinite(Number(u.video_timestamp_seconds))) unit.video_timestamp_seconds = Number(u.video_timestamp_seconds);
-      else {
-        const stamp = unit.source_location.match(/(?:^|\s)(?:(\d+):)?(\d{1,2}):(\d{2})(?:$|\s)/);
-        if (stamp) unit.video_timestamp_seconds = (Number(stamp[1] || 0) * 3600) + (Number(stamp[2]) * 60) + Number(stamp[3]);
-      }
-      const sourceVideoId = unit.source_type === 'youtube' ? unit.source_file.match(/(?:v=|youtu\.be\/|shorts\/)([A-Za-z0-9_-]{11})/)?.[1] : undefined;
+      const seconds = parseTimestampSeconds(sourceLocation);
+      if (seconds !== null && (sourceType === 'video' || sourceType === 'youtube')) unit.video_timestamp_seconds = seconds;
+      const sourceVideoId = sourceType === 'youtube' ? sourceFile.match(/(?:v=|youtu\.be\/|shorts\/)([A-Za-z0-9_-]{11})/)?.[1] : undefined;
       if (sourceVideoId) unit.youtube_video_id = sourceVideoId;
-      else if (u.youtube_video_id) unit.youtube_video_id = String(u.youtube_video_id);
       if (u.is_figure) { unit.is_figure = true; unit.figure_caption = String(u.figure_caption || ''); }
       return unit;
-    });
-    if (!safeUnits.length) return res.status(422).json({ error: 'The model did not return units tied to a readable supplied source. No unsupported units were added.', warnings });
+    }).filter((unit: any) => unit !== null);
+    if (!safeUnits.length) return res.status(422).json({ error: 'No content units had both a readable source and a validated source location.', warnings });
     for (const topic of safeTopics) topic.unit_count = safeUnits.filter((u: any) => u.topic_id === topic.id).length;
     return res.json({ topics: safeTopics, units: safeUnits, warnings, sourceCount: sourceNames.length });
   } catch (err: any) {
