@@ -5,7 +5,7 @@
  * Highlights exact excerpt, displays diagram figures, and provides simulated video timestamp player.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   X,
   FileText,
@@ -19,6 +19,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Citation } from '../../types';
+import { getSourceFileUrl } from '../../services/sourceFiles';
 
 interface SourceViewerDrawerProps {
   citation: Citation | null;
@@ -33,8 +34,19 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [isFigureExpanded, setIsFigureExpanded] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && citation?.video_timestamp_seconds !== undefined) {
+      const seek = () => { if (videoRef.current) videoRef.current.currentTime = citation.video_timestamp_seconds || 0; };
+      videoRef.current.addEventListener('loadedmetadata', seek, { once: true });
+      return () => videoRef.current?.removeEventListener('loadedmetadata', seek);
+    }
+  }, [citation]);
 
   if (!isOpen || !citation) return null;
+  const sourceUrl = getSourceFileUrl(citation.source_file);
+  const pageNumber = citation.source_location.match(/page\\s*(\\d+)/i)?.[1] || '1';
 
   const handleCopyCitation = () => {
     const text = `[Source Citation] ${citation.source_title} - ${citation.source_file} (${citation.source_location})\nExcerpt: "${citation.excerpt}"`;
@@ -108,6 +120,21 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
             </span>
           </div>
 
+          {citation.source_type === 'pdf' && sourceUrl && (
+            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
+              <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-950">Original PDF · page {pageNumber}</div>
+              <iframe title={citation.source_title + ' page ' + pageNumber} src={sourceUrl + '#page=' + pageNumber} className="w-full h-[420px]" />
+            </div>
+          )}
+          {citation.source_type === 'slide' && sourceUrl && /\\.(png|jpe?g|webp)$/i.test(citation.source_file) && (
+            <img src={sourceUrl} alt={citation.source_title} className="w-full rounded-xl border border-slate-200 dark:border-slate-800 object-contain max-h-[420px]" />
+          )}
+          {citation.source_type === 'slide' && sourceUrl && /\\.pptx$/i.test(citation.source_file) && (
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+              Original presentation is available in this browser session. The browser cannot preview PPTX directly; use the slide number and extracted excerpt below.
+            </div>
+          )}
+
           {/* Real YouTube player when a video ID is known; no simulated player controls. */}
           {citation.source_type === 'youtube' && citation.youtube_video_id && (
             <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950">
@@ -124,10 +151,16 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
               <p className="px-3 py-2 text-[11px] text-slate-400">YouTube source · starts at {citation.source_location}</p>
             </div>
           )}
-          {(citation.source_type === 'video' || (citation.source_type === 'youtube' && !citation.youtube_video_id)) && (
+          {citation.source_type === 'video' && sourceUrl && (
+            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950">
+              <video ref={videoRef} src={sourceUrl} controls className="w-full aspect-video" />
+              <p className="px-3 py-2 text-[11px] text-slate-400">Original uploaded video · seek target {citation.source_location}</p>
+            </div>
+          )}
+          {(citation.source_type === 'video' && !sourceUrl || (citation.source_type === 'youtube' && !citation.youtube_video_id)) && (
             <div className="p-4 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-200">
               <strong>Video reference</strong>
-              <p className="mt-1">Timestamp metadata is shown below, but the original uploaded video is not stored by this browser-based knowledge base, so a playable stream is not available here.</p>
+              <p className="mt-1">Timestamp metadata is available, but the original media is not accessible in this browser session.</p>
             </div>
           )}
 
