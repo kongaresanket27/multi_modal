@@ -48,7 +48,7 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
   // Past answered question IDs for 0% repeat guarantee
   const pastAnsweredQuestionIds = new Set<string>();
   quizHistory.forEach(q => {
-    q.answers.forEach(a => pastAnsweredQuestionIds.add(a.question_id));
+    (q.question_ids || q.answers.map(answer => answer.question_id)).forEach(id => pastAnsweredQuestionIds.add(id));
   });
 
   if (!course.content_units.length || !course.topics.length) {
