@@ -15,12 +15,7 @@ Students frequently study from fragmented materials—YouTube lecture videos, de
 3. **Out-of-Material Refusal:** Queries outside the course syllabus are flagged with an amber refusal banner, refusing hallucinated blends and strictly isolating unverified outside knowledge.
 4. **Adaptive Assessment & Dual-Pass Verification:** Generates MCQs, short answers, and numerical problems. Newly generated questions undergo an automated second-pass solve without the answer key; discrepancies are dropped. Employs past question hashing to guarantee **0% question repetition**.
 5. **Bayesian Knowledge Tracing (BKT) Learner Model:** Implements the classic Corbett & Anderson 4-parameter probabilistic model ($P(L_0), P(T), P(G), P(S)$) combined with Ebbinghaus memory stability decay curves ($R(t) = \exp(-t/S)$) to schedule reviews before forgetting occurs.
-6. **System Evaluation & Benchmarking:** Evaluates retrieval & generation using the **RAGAS framework** on 150 ground-truth questions:
-   - **Faithfulness:** 96.4% (Target: &ge;90%)
-   - **Answer Relevancy:** 94.2% (Target: &ge;88%)
-   - **Context Precision:** 92.8% (Target: &ge;85%)
-   - **Context Recall:** 95.1% (Target: &ge;90%)
-   - **Out-of-Material Refusal Rate:** 100.0% (Target: &ge;95%)
+6. **System Evaluation & Benchmarking:** The evaluation dashboard lists RAGAS-style metrics and target thresholds, but **no benchmark results are currently claimed**. Scores remain “Not measured” until a labeled test set is run and reproducible results are recorded. The dashboard can run a deterministic synthetic BKT learner simulation; those outcomes are illustrative simulations, not evidence from real students.
 
 ---
 
@@ -28,10 +23,11 @@ Students frequently study from fragmented materials—YouTube lecture videos, de
 
 StudyPilot includes a built-in **"Demo Course"** button in the top bar that instantly populates:
 - **Stanford / MIT CS229: Deep Learning & Neural Architectures**
-- 8 structured topics with subtopics and prerequisite DAG edges
-- 40+ content units with verified textbook pages (Goodfellow Ch 6-8, Vaswani et al.), slide numbers, and video timestamps
-- Extracted visual figures and diagram cards
-- 30-day realistic student mastery history and past quiz submissions with misconception tags
+- A preloaded illustrative sample course for exploring the UI (not a verified external-source corpus)
+- Example topics, content units, and prerequisite edges for demonstration
+- Example learner progress and quiz history to preview dashboard behavior
+
+**Important:** demo citations and learner histories are illustrative. Upload real course sources before relying on citations or reporting academic evaluation results.
 
 ---
 
@@ -80,7 +76,7 @@ Raw Multimodal Inputs (PDFs, Slides, Videos, YouTube URLs)
 ## 📦 Setup & Development
 
 ### Prerequisites
-- Node.js &ge; 18
+- Node.js &ge; 20.19 (or 22.12+)
 - NPM &ge; 9
 
 ### Environment Variables
@@ -100,3 +96,34 @@ npm install
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+
+## Implemented ingestion and grounding behavior
+
+- The ingestion screen now sends selected files to `POST /api/ingest`; it no longer invents progress logs or fixed extraction counts.
+- PDF and image content is sent to the server-side Gemini model. PPTX slide text is extracted from the presentation XML, and embedded slide images are also passed for visual interpretation. MP4/MOV files are passed to Gemini when under the inline upload limit.
+- Each file is limited to 18 MB and batches support up to 8 files. The Express JSON body limit is 50 MB, so keep combined uploads comfortably below that limit.
+- YouTube ingestion attempts to retrieve an English caption track. If no captions are available, the system warns and does not fabricate transcript-based units; upload a transcript or video file instead.
+- Ingestion output is accepted only when its source filename/URL matches a readable source supplied in that request. Page/slide/timestamp values are still model-extracted metadata and should be checked against the original material before high-stakes use.
+- Quiz generation uses selected course excerpts and independently re-solves generated questions in a second model pass without providing the proposed answer key. Questions that fail source or answer checks are dropped. Stable question IDs help prevent repeats across subsequent generated assessments.
+- Tutor responses refuse when retrieval finds no sufficiently relevant excerpt. If the AI service is unavailable, the fallback displays retrieved excerpts instead of inventing an explanation.
+
+## Architecture and learner model
+
+- **Frontend:** React + TypeScript + Vite.
+- **API:** Express + TypeScript server in `server.ts`; Gemini calls remain server-side and use `GEMINI_API_KEY`.
+- **Knowledge base:** structured `Topic` and `ContentUnit` objects persisted in browser local storage for the active course.
+- **Retrieval and grounding:** BM25-style lexical/concept-tag scoring selects excerpts; the tutor cites retrieved excerpts and declines when retrieval confidence is too low.
+- **Assessment:** topic-scoped question generation, source metadata, independent second-pass answer verification, and stable question IDs for novelty checks.
+- **Learner model:** the BKT update function uses initial mastery, learn, guess, and slip parameters; spaced-repetition helpers track stability and review timing.
+
+## Evaluation status
+
+The current repository does **not** contain a completed, labeled RAGAS/DeepEval/TruLens evaluation run. The dashboard intentionally displays “Not measured” for faithfulness, answer relevancy, context precision, context recall, and refusal rate instead of presenting unverified percentages. Before submission, create a labeled test set with source locations and off-material questions, run the evaluation, and record the method, sample size, and actual results here.
+
+## Hackathon submission checklist
+
+- [ ] Devpost project description explains the problem, implementation, and grounding approach.
+- [ ] Public GitHub repository includes setup instructions and architecture documentation.
+- [ ] A 3–10 minute YouTube demo (unlisted is acceptable, private is not) shows the running app, ingestion, cited tutoring, assessments, and architecture; English audio or subtitles are required.
+- [ ] All team members are added to the Devpost submission with their real full names.
