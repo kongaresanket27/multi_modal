@@ -23,5 +23,14 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Type-check
         run: npm run lint
+      - name: Run deterministic retrieval and refusal benchmark
+        run: npm run evaluate:retrieval
       - name: Build production frontend
         run: npm run build
+      - name: Upload retrieval benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrieval-benchmark-results
+          path: evaluation/retrieval-benchmark-results.json
+          if-no-files-found: ignore
