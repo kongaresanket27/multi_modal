@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { UploadCloud, FileText, Video, Youtube, CheckCircle2, Sparkles, ArrowRight, Loader2, X, AlertCircle } from 'lucide-react';
 import { useAppStore } from '../store/useStore';
 import { ContentUnit, Topic } from '../types';
-import { registerSourceFile } from '../services/sourceFiles';
+import { registerSourceFile, unregisterSourceFile } from '../services/sourceFiles';
 
 interface IngestionPageProps {
   store: ReturnType<typeof useAppStore>;
@@ -34,8 +34,25 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({ store, onExploreKn
 
   const addFiles = (event: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(event.target.files || []);
-    const accepted = picked.filter(file => /\.(pdf|pptx|mp4|mov|png|jpe?g|txt|md)$/i.test(file.name));
-    if (accepted.length !== picked.length) setError('Some files were skipped. Supported: PDF, PPTX, MP4/MOV, PNG/JPG, TXT, and MD.');
+    const supported = picked.filter(file => /\.(pdf|pptx|mp4|mov|png|jpe?g|txt|md)$/i.test(file.name));
+    const withinPerFileLimit = supported.filter(file => file.size <= 18 * 1024 * 1024);
+    if (supported.length !== picked.length) setError('Some files were skipped. Supported: PDF, PPTX, MP4/MOV, PNG/JPG, TXT, and MD.');
+    if (withinPerFileLimit.length !== supported.length) setError('Files over 18 MB were skipped. Compress or split them before uploading.');
+    const currentFiles = sources.filter((source): source is Extract<QueuedSource, { kind: 'file' }> => source.kind === 'file');
+    let totalBytes = currentFiles.reduce((total, source) => total + source.file.size, 0);
+    const accepted: File[] = [];
+    for (const file of withinPerFileLimit) {
+      if (currentFiles.length + accepted.length >= 8 || totalBytes + file.size > 32 * 1024 * 1024) {
+        setError('A batch can contain up to 8 files and 32 MB total. Remove files or ingest in smaller batches.');
+        continue;
+      }
+      if ([...currentFiles.map(source => source.file.name), ...accepted.map(item => item.name)].includes(file.name)) {
+        setError('A file named "' + file.name + '" is already queued. Rename duplicate files so citations remain unambiguous.');
+        continue;
+      }
+      accepted.push(file);
+      totalBytes += file.size;
+    }
     if (accepted.length) {
       accepted.forEach(registerSourceFile);
       setSources(prev => [...prev, ...accepted.map(file => ({ id: crypto.randomUUID(), kind: 'file' as const, file }))]);
@@ -98,6 +115,8 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({ store, onExploreKn
   };
 
   const removeSource = (id: string) => {
+    const source = sources.find(item => item.id === id);
+    if (source?.kind === 'file') unregisterSourceFile(source.file.name);
     setSources(prev => prev.filter(source => source.id !== id));
     setIsCompleted(false);
   };
@@ -119,7 +138,7 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({ store, onExploreKn
             <input type="file" multiple accept=".pdf,.pptx,.mp4,.mov,.png,.jpg,.jpeg,.txt,.md" onChange={addFiles} className="hidden" />
             <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto mb-3 group-hover:scale-105 transition-transform"><UploadCloud className="w-6 h-6" /></div>
             <h3 className="text-sm font-bold text-slate-900 dark:text-white">Choose course files to upload</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">PDF, PPTX, MP4/MOV, PNG/JPG, TXT, and Markdown. Maximum 18 MB per file for inline AI processing.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">PDF, PPTX, MP4/MOV, PNG/JPG, TXT, and Markdown. Maximum 18 MB per file and 32 MB total per batch.</p>
           </label>
 
           <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2">
@@ -128,7 +147,7 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({ store, onExploreKn
               <input type="url" value={youtubeUrl} onChange={e => setYoutubeUrl(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addYouTube(); } }} placeholder="https://www.youtube.com/watch?v=…" className="flex-1 min-w-0 px-3.5 py-2 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500" />
               <button type="button" onClick={addYouTube} className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200">Add URL</button>
             </div>
-            <p className="text-[11px] text-slate-500">YouTube links are passed to the ingestion model; transcript availability depends on the model/API being able to access that video.</p>
+            <p className="text-[11px] text-slate-500">YouTube links use an available English caption track. Links without accessible captions return a warning and are not treated as ingested content.</p>
           </div>
 
           {error && <div role="alert" className="flex items-start gap-2 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />{error}</div>}
