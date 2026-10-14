@@ -283,6 +283,8 @@ app.post('/api/ingest', async (req, res) => {
       return res.status(400).json({ error: 'Add at least one supported file or YouTube URL.' });
     }
     if (files.length > 8) return res.status(400).json({ error: 'Upload up to 8 files per batch.' });
+    if (youtubeUrls.length > 5) return res.status(400).json({ error: 'Add up to 5 YouTube URLs per batch.' });
+    let totalUploadBytes = 0;
 
     const parts: any[] = [];
     const sourceNames: string[] = [];
@@ -291,10 +293,20 @@ app.post('/api/ingest', async (req, res) => {
     for (const file of files) {
       if (!file?.name || !file?.mimeType || !file?.data) return res.status(400).json({ error: 'A file is missing its name, MIME type, or content.' });
       const name = String(file.name).slice(0, 200);
-      const mimeType = String(file.mimeType);
+      const declaredMimeType = String(file.mimeType);
+      const extension = name.split('.').pop()?.toLowerCase() || '';
+      const extensionMimeTypes: Record<string, string> = {
+        pdf: 'application/pdf', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        mp4: 'video/mp4', mov: 'video/quicktime', png: 'image/png', jpg: 'image/jpeg',
+        jpeg: 'image/jpeg', txt: 'text/plain', md: 'text/markdown',
+      };
+      const mimeType = declaredMimeType === 'application/octet-stream' ? (extensionMimeTypes[extension] || declaredMimeType) : declaredMimeType;
+      if (!extensionMimeTypes[extension]) return res.status(415).json({ error: 'Unsupported file extension: ' + name });
       const bytes = Buffer.from(String(file.data).replace(/^data:[^;]+;base64,/, ''), 'base64');
       if (!bytes.length) return res.status(400).json({ error: 'Could not read ' + name + '.' });
       if (bytes.length > 18 * 1024 * 1024) return res.status(413).json({ error: name + ' exceeds the 18 MB per-file inline ingestion limit. Compress or split it.' });
+      totalUploadBytes += bytes.length;
+      if (totalUploadBytes > 32 * 1024 * 1024) return res.status(413).json({ error: 'Combined file size exceeds the 32 MB batch limit. Process fewer files at a time.' });
 
       if (mimeType.includes('presentation') || name.toLowerCase().endsWith('.pptx')) {
         const zipEntries = readZipEntries(bytes);
@@ -377,21 +389,26 @@ app.post('/api/ingest', async (req, res) => {
     const warnings = [...ingestionWarnings, ...(Array.isArray(parsed.warnings) ? parsed.warnings.map(String) : [])];
     if (!units.length) return res.status(422).json({ error: 'No grounded content units could be extracted from these sources.', warnings });
 
+    const ingestionId = Date.now().toString(36);
+    const topicIdMap = new Map<string, string>();
+    topics.forEach((topic: any, index: number) => {
+      topicIdMap.set(String(topic.id || '__missing_' + index), 'ingested-topic-' + ingestionId + '-' + (index + 1));
+    });
     const safeTopics = topics.map((t: any, i: number) => ({
-      id: String(t.id || ('ingested-topic-' + Date.now() + '-' + i)),
+      id: topicIdMap.get(String(t.id || '__missing_' + i)) || ('ingested-topic-' + ingestionId + '-' + (i + 1)),
       title: String(t.title || 'Untitled topic'),
       description: String(t.description || ''),
       subtopics: Array.isArray(t.subtopics) ? t.subtopics.map(String) : [],
       concepts: Array.isArray(t.concepts) ? t.concepts.map(String) : [],
-      estimated_study_minutes: Number(t.estimated_study_minutes) || 15,
-      prerequisite_ids: Array.isArray(t.prerequisite_ids) ? t.prerequisite_ids.map(String) : [],
+      estimated_study_minutes: Math.max(1, Math.min(600, Number(t.estimated_study_minutes) || 15)),
+      prerequisite_ids: Array.isArray(t.prerequisite_ids) ? t.prerequisite_ids.map(String).map((id: string) => topicIdMap.get(id)).filter((id: string | undefined): id is string => Boolean(id)) : [],
       unit_count: 0,
     }));
     const topicNames = new Map(safeTopics.map((t: any) => [t.id, t.title]));
     const safeUnits = units.filter((u: any) => sourceTypes.has(String(u.source_file || ''))).map((u: any, i: number) => {
-      const topicId = String(u.topic_id || safeTopics[0]?.id || 'ingested-topic');
+      const topicId = topicIdMap.get(String(u.topic_id || '')) || safeTopics[0]?.id || 'ingested-topic';
       const unit: any = {
-        id: String(u.id || ('ingested-unit-' + Date.now() + '-' + i)),
+        id: 'ingested-unit-' + ingestionId + '-' + (i + 1),
         title: String(u.title || 'Untitled content'),
         summary: String(u.summary || ''),
         full_text_excerpt: String(u.full_text_excerpt || ''),
