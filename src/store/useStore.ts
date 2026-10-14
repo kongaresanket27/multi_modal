@@ -231,6 +231,7 @@ export function useAppStore() {
       ...prev,
       total_quizzes_taken: prev.total_quizzes_taken + 1,
       total_questions_answered: prev.total_questions_answered + submission.total_questions,
+      diagnostic_completed: true,
       completed_hours_this_week: Number((prev.completed_hours_this_week + submission.time_spent_seconds / 3600).toFixed(1)),
     }));
   }, []);
