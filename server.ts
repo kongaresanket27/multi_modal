@@ -362,6 +362,8 @@ app.post('/api/ingest', async (req, res) => {
       if (transcriptAdded) sourceTypes.set(url, 'youtube');
     }
 
+    if (!parts.length) return res.status(422).json({ error: 'No readable source content was available to process.', warnings: ingestionWarnings });
+
     const systemInstruction = 'You are StudyPilot, a source-faithful course material ingestion engine. Analyze only supplied materials; never invent facts, page numbers, slide numbers, timestamps, or diagrams. Return only valid JSON: {"topics":[{"id":"topic-slug","title":"...","description":"...","subtopics":["..."],"concepts":["..."],"estimated_study_minutes":15,"prerequisite_ids":[]}],"units":[{"id":"unique-id","title":"...","summary":"...","full_text_excerpt":"...","topic_id":"matching topic id","topic_name":"...","subtopic":"...","concept_tags":["..."],"difficulty":"easy|medium|hard","source_type":"pdf|slide|video|youtube|text","source_file":"exact filename or URL","source_location":"grounded Page N, Slide N, or timestamp","video_timestamp_seconds":0,"youtube_video_id":"if known","is_figure":false,"figure_caption":""}],"warnings":[]} Create up to 12 meaningful units per source and 1-8 topics. Keep each excerpt grounded in the actual material. Do not create units for inaccessible URLs.';
     const response = await ai.models.generateContent({
       model: 'gemini-3.8-flash',
