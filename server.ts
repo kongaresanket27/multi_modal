@@ -299,10 +299,6 @@ app.post('/api/generate-quiz', async (req, res) => {
   }
 });
 
-e || 'Error generating quiz' });
-  }
-});
-
 // Answer Grading Endpoint
 app.post('/api/grade-answer', async (req, res) => {
   try {
