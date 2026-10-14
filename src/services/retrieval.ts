@@ -16,13 +16,22 @@ export interface RetrievalResult {
   retrievalSummary: string;
 }
 
-// Normalized tokenization
+// Normalized tokenization. Common question words should not make unrelated excerpts look relevant.
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'does', 'why', 'how', 'what', 'which', 'who', 'when', 'where',
+  'is', 'are', 'was', 'were', 'do', 'did', 'a', 'an', 'or', 'but', 'to', 'of', 'in',
+  'on', 'at', 'by', 'with', 'from', 'about', 'into', 'it', 'this', 'that', 'these',
+  'those', 'as', 'than', 'more', 'less', 'most', 'much', 'many', 'can', 'could',
+  'would', 'should', 'using', 'used', 'use', 'me', 'my', 'your', 'please', 'give',
+  'show', 'tell', 'explain', 'won', 'country',
+]);
+
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^\w\s-]/g, ' ')
     .split(/\s+/)
-    .filter(token => token.length > 2);
+    .filter(token => token.length > 2 && !STOPWORDS.has(token));
 }
 
 /**
@@ -33,7 +42,7 @@ export function retrieveContextUnits(
   units: ContentUnit[],
   maxUnits: number = 4
 ): RetrievalResult {
-  const queryTokens = tokenize(query);
+  const queryTokens = [...new Set(tokenize(query))];
   
   if (queryTokens.length === 0 || units.length === 0) {
     return {
