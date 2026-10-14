@@ -136,6 +136,7 @@ export default function App() {
               onNavigateToQuiz={handleLaunchQuizForTopic}
               onNavigateToTutor={handleAskTutorWithQuery}
               onNavigateToCourseMap={() => setActiveTab('course_map')}
+              onNavigateToIngestion={() => setActiveTab('ingestion')}
             />
           )}
 
@@ -175,6 +176,7 @@ export default function App() {
                   store={store}
                   onStartQuiz={handleStartQuiz}
                   initialTopicId={preselectedQuizTopicId}
+                  onNavigateToIngestion={() => setActiveTab('ingestion')}
                 />
               )}
             </>

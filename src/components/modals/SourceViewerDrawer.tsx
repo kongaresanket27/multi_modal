@@ -14,13 +14,12 @@ import {
   ExternalLink,
   Copy,
   Check,
-  Play,
-  Pause,
   Maximize2,
   Clock,
   Sparkles,
 } from 'lucide-react';
 import { Citation } from '../../types';
+import { getSourceFileUrl } from '../../services/sourceFiles';
 
 interface SourceViewerDrawerProps {
   citation: Citation | null;
@@ -34,10 +33,10 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
   onClose,
 }) => {
   const [copied, setCopied] = useState(false);
-  const [isPlayingVideo, setIsPlayingVideo] = useState(false);
   const [isFigureExpanded, setIsFigureExpanded] = useState(false);
-
   if (!isOpen || !citation) return null;
+  const sourceUrl = getSourceFileUrl(citation.source_file);
+  const pageNumber = citation.source_location.match(/page\s*(\d+)/i)?.[1] || '1';
 
   const handleCopyCitation = () => {
     const text = `[Source Citation] ${citation.source_title} - ${citation.source_file} (${citation.source_location})\nExcerpt: "${citation.excerpt}"`;
@@ -111,40 +110,47 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
             </span>
           </div>
 
-          {/* Video Player Mock if Source is Video */}
-          {(citation.source_type === 'video' || citation.source_type === 'youtube') && (
-            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 relative group">
-              <div className="aspect-video relative flex items-center justify-center">
-                {citation.figure_image_url ? (
-                  <img
-                    src={citation.figure_image_url}
-                    alt="Video Lecture Frame"
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-slate-900 flex items-center justify-center text-slate-600">
-                    <Video className="w-12 h-12" />
-                  </div>
-                )}
-                {/* Overlay Play Controls */}
-                <div className="absolute inset-0 bg-slate-950/40 flex items-center justify-center">
-                  <button
-                    onClick={() => setIsPlayingVideo(!isPlayingVideo)}
-                    className="w-12 h-12 rounded-full bg-indigo-600/90 text-white flex items-center justify-center shadow-lg hover:scale-105 transition-transform cursor-pointer"
-                  >
-                    {isPlayingVideo ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-                  </button>
-                </div>
-                {/* Timestamp Pill */}
-                <div className="absolute bottom-2 left-2 px-2 py-1 rounded bg-black/80 text-[11px] font-mono text-white flex items-center gap-1.5 backdrop-blur-xs">
-                  <Clock className="w-3 h-3 text-cyan-400" />
-                  <span>Seek: {citation.source_location}</span>
-                </div>
+          {citation.source_type === 'pdf' && sourceUrl && (
+            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
+              <div className="px-3 py-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-950">Original PDF · page {pageNumber}</div>
+              <iframe title={citation.source_title + ' page ' + pageNumber} src={sourceUrl + '#page=' + pageNumber} className="w-full h-[420px]" />
+            </div>
+          )}
+          {citation.source_type === 'slide' && sourceUrl && /\.(png|jpe?g|webp)$/i.test(citation.source_file) && (
+            <img src={sourceUrl} alt={citation.source_title} className="w-full rounded-xl border border-slate-200 dark:border-slate-800 object-contain max-h-[420px]" />
+          )}
+          {citation.source_type === 'slide' && sourceUrl && /\.pptx$/i.test(citation.source_file) && (
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+              Original presentation is available in this browser session. The browser cannot preview PPTX directly; use the slide number and extracted excerpt below.
+            </div>
+          )}
+
+          {/* Real YouTube player when a video ID is known; no simulated player controls. */}
+          {citation.source_type === 'youtube' && citation.youtube_video_id && (
+            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950">
+              <div className="aspect-video">
+                <iframe
+                  title={citation.source_title}
+                  src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(citation.youtube_video_id)}?start=${Math.max(0, Math.floor(citation.video_timestamp_seconds || 0))}`}
+                  className="w-full h-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  allowFullScreen
+                />
               </div>
-              <div className="p-2.5 bg-slate-900 text-xs text-slate-400 flex items-center justify-between">
-                <span>Lecture Video Stream (Synchronized Timestamp)</span>
-                <span className="text-[10px] text-cyan-400 font-mono">0.0s latency seek</span>
-              </div>
+              <p className="px-3 py-2 text-[11px] text-slate-400">YouTube source · starts at {citation.source_location}</p>
+            </div>
+          )}
+          {citation.source_type === 'video' && sourceUrl && (
+            <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950">
+              <video src={sourceUrl} controls onLoadedMetadata={event => { event.currentTarget.currentTime = citation.video_timestamp_seconds || 0; }} className="w-full aspect-video" />
+              <p className="px-3 py-2 text-[11px] text-slate-400">Original uploaded video · seek target {citation.source_location}</p>
+            </div>
+          )}
+          {(citation.source_type === 'video' && !sourceUrl || (citation.source_type === 'youtube' && !citation.youtube_video_id)) && (
+            <div className="p-4 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-200">
+              <strong>Video reference</strong>
+              <p className="mt-1">Timestamp metadata is available, but the original media is not accessible in this browser session.</p>
             </div>
           )}
 
@@ -181,7 +187,7 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
           {/* Exact Text Excerpt */}
           <div className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Verified Source Excerpt
+              Retrieved Source Excerpt
             </h4>
             <div className="p-4 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-800/40 text-sm leading-relaxed text-slate-800 dark:text-slate-200 relative">
               <span className="text-amber-500 font-serif font-bold text-lg select-none mr-1">“</span>
@@ -194,7 +200,7 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
           <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs space-y-1.5 text-slate-600 dark:text-slate-400">
             <div className="flex justify-between">
               <span>Grounding Integrity:</span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">100% Verifiable</span>
+              <span className="text-slate-600 dark:text-slate-300 font-semibold">Provenance recorded</span>
             </div>
             <div className="flex justify-between">
               <span>Origin File:</span>

@@ -23,14 +23,17 @@ interface QuizBuilderPageProps {
   store: ReturnType<typeof useAppStore>;
   onStartQuiz: (questions: Question[], quizTitle: string, isTimed: boolean) => void;
   initialTopicId?: string;
+  onNavigateToIngestion: () => void;
 }
 
 export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
   store,
   onStartQuiz,
   initialTopicId,
+  onNavigateToIngestion,
 }) => {
-  const { course, topicMastery, quizHistory } = store;
+  const { course, topicMastery, quizHistory, learnerProfile } = store;
+  const isDiagnostic = !learnerProfile.diagnostic_completed;
 
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(
     initialTopicId ? [initialTopicId] : []
@@ -40,12 +43,26 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
   const [selectedTypes, setSelectedTypes] = useState<QuestionType[]>(['mcq', 'numerical']);
   const [isTimedExam, setIsTimedExam] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [generationError, setGenerationError] = useState<string>('');
 
   // Past answered question IDs for 0% repeat guarantee
   const pastAnsweredQuestionIds = new Set<string>();
   quizHistory.forEach(q => {
-    q.answers.forEach(a => pastAnsweredQuestionIds.add(a.question_id));
+    (q.question_ids || q.answers.map(answer => answer.question_id)).forEach(id => pastAnsweredQuestionIds.add(id));
   });
+
+  if (!course.content_units.length || !course.topics.length) {
+    return (
+      <div className="p-6 md:p-8 max-w-4xl mx-auto">
+        <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center space-y-3">
+          <BookOpen className="w-8 h-8 mx-auto text-indigo-500" />
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Assessments need course material</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400">Upload a textbook, slide deck, or lecture first. Questions will be generated from those excerpts and independently checked before they are shown.</p>
+          <button type="button" onClick={onNavigateToIngestion} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Upload course material</button>
+        </div>
+      </div>
+    );
+  }
 
   const toggleTopic = (id: string) => {
     setSelectedTopicIds(prev =>
@@ -63,6 +80,7 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
 
   const handleGenerate = async () => {
     setIsGenerating(true);
+    setGenerationError('');
     try {
       const targetTopicIds = selectedTopicIds.length > 0
         ? selectedTopicIds
@@ -72,10 +90,16 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
         targetTopicIds,
         questionCount,
         difficulty,
-        pastAnsweredQuestionIds
+        pastAnsweredQuestionIds,
+        course.content_units,
+        selectedTypes,
+        topicMastery,
+        isDiagnostic
       );
 
-      const title = selectedTopicIds.length === 1
+      const title = isDiagnostic
+        ? 'Initial Diagnostic Assessment'
+        : selectedTopicIds.length === 1
         ? `${course.topics.find(t => t.id === selectedTopicIds[0])?.title} Quiz`
         : isTimedExam
         ? `${course.code} Timed Mock Examination`
@@ -84,6 +108,7 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
       onStartQuiz(questions, title, isTimedExam);
     } catch (err) {
       console.error('Quiz builder error:', err);
+      setGenerationError(err instanceof Error ? err.message : 'Quiz generation failed. Please try again.');
     } finally {
       setIsGenerating(false);
     }
@@ -106,9 +131,16 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
           Adaptive Assessment Generator
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Generate custom quizzes and timed mock exams with automatic verification, zero-repeat anti-duplication, and cited feedback.
+          Generate custom quizzes and timed mock exams with independent answer checks, repeat prevention, and source-cited feedback.
         </p>
+        {isDiagnostic && (
+          <div className="mt-4 p-3 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/30 text-xs text-indigo-800 dark:text-indigo-200">
+            <strong>First-session diagnostic:</strong> your first assessment establishes a baseline for each selected topic. Topic mastery updates after you submit your answers.
+          </div>
+        )}
       </div>
+
+      {generationError && <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">{generationError}</div>}
 
       {/* Main Settings Card */}
       <div className="p-6 md:p-8 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
@@ -177,8 +209,9 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
             ].map((d) => (
               <button
                 key={d.id}
-                onClick={() => setDifficulty(d.id as any)}
-                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                disabled={isDiagnostic && d.id !== 'adaptive'}
+                onClick={() => { if (!isDiagnostic) setDifficulty(d.id as any); }}
+                className={`p-3 rounded-xl border text-left transition-all ${isDiagnostic && d.id !== 'adaptive' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${
                   difficulty === d.id
                     ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-500 text-indigo-900 dark:text-indigo-200 shadow-xs'
                     : 'bg-slate-50 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
@@ -191,7 +224,41 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
           </div>
         </div>
 
-        {/* Step 3: Question Count & Mode */}
+  
+      {/* Question types */}
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-xs font-bold text-slate-800 dark:text-slate-200">Question Types</h3>
+          <p className="text-[11px] text-slate-500 mt-1">Choose one or more formats. At least one must remain selected.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {[
+            { id: 'mcq', label: 'Multiple choice', detail: 'Four options, one answer' },
+            { id: 'short_answer', label: 'Short answer', detail: 'Explain a concept' },
+            { id: 'numerical', label: 'Numerical', detail: 'Calculate from source methods' },
+          ].map(type => {
+            const selected = selectedTypes.includes(type.id as QuestionType);
+            return (
+              <button
+                key={type.id}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setSelectedTypes(previous => {
+                  const value = type.id as QuestionType;
+                  if (previous.includes(value)) return previous.length > 1 ? previous.filter(item => item !== value) : previous;
+                  return [...previous, value];
+                })}
+                className={selected ? 'p-3 rounded-xl border border-indigo-500 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-200 text-left transition-colors' : 'p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 text-left transition-colors'}
+              >
+                <span className="block text-xs font-bold">{type.label}</span>
+                <span className="block text-[10px] mt-1">{type.detail}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Step 3: Question Count & Mode */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 border-t border-slate-100 dark:border-slate-800">
           {/* Question Count */}
           <div className="space-y-2">
@@ -245,14 +312,14 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
           </div>
         </div>
 
-        {/* Verification Guarantee & Anti-Repeat Status */}
+        {/* Verification & repeat checks */}
         <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-xs flex items-center justify-between text-slate-600 dark:text-slate-400">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <span>Dual-pass solver verification active</span>
+            <span>Independent second-pass answer check enabled</span>
           </div>
           <span className="font-mono text-[11px] text-slate-500">
-            0% repetition rate ({pastAnsweredQuestionIds.size} logged past items)
+            {pastAnsweredQuestionIds.size} previously answered question IDs tracked; reworded duplicates may remain
           </span>
         </div>
 

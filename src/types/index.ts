@@ -4,7 +4,7 @@
  * Adaptive Quizzes, and Source-Grounded Tutoring.
  */
 
-export type SourceType = 'pdf' | 'slide' | 'video' | 'youtube';
+export type SourceType = 'pdf' | 'slide' | 'video' | 'youtube' | 'text';
 
 export interface ContentUnit {
   id: string;
@@ -143,8 +143,10 @@ export interface QuizSubmission {
   total_questions: number;
   correct_questions: number;
   topic_ids: string[];
+  question_ids?: string[];
   answers: {
     question_id: string;
+    topic_id?: string;
     user_answer: string;
     is_correct: boolean;
     partial_score?: number;
@@ -171,6 +173,7 @@ export interface Citation {
   excerpt: string;
   figure_image_url?: string;
   video_timestamp_seconds?: number;
+  youtube_video_id?: string;
 }
 
 export interface ChatMessage {

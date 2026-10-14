@@ -34,17 +34,15 @@ export const CourseFlowMapPage: React.FC<CourseFlowMapPageProps> = ({
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
 
-  // Layout positions for the 8 topics in a structured DAG format
-  const nodePositions: Record<string, { x: number; y: number }> = {
-    'topic-1': { x: 100, y: 150 }, // Foundations: Autodiff
-    'topic-2': { x: 300, y: 80 },  // Optimization
-    'topic-3': { x: 300, y: 220 }, // CNNs
-    'topic-4': { x: 480, y: 150 }, // RNNs
-    'topic-5': { x: 660, y: 150 }, // Transformers
-    'topic-6': { x: 480, y: 280 }, // Regularization
-    'topic-7': { x: 840, y: 150 }, // Latent Embeddings
-    'topic-8': { x: 660, y: 280 }, // Generalization & Double Descent
-  };
+  // Derive a responsive grid from the ingested topic list instead of assuming fixed demo topic IDs.
+  const mapRows = Math.max(1, Math.ceil(course.topics.length / 3));
+  const mapHeight = Math.max(380, mapRows * 130 + 100);
+  const nodePositions: Record<string, { x: number; y: number }> = Object.fromEntries(
+    course.topics.map((topic, index) => [
+      topic.id,
+      { x: 120 + (index % 3) * 320, y: 80 + Math.floor(index / 3) * 130 },
+    ])
+  );
 
   const getNodeColor = (topicId: string) => {
     const tm = topicMastery.find((m) => m.topic_id === topicId);
@@ -76,6 +74,18 @@ export const CourseFlowMapPage: React.FC<CourseFlowMapPageProps> = ({
       };
     }
   };
+
+  if (!course.topics.length) {
+    return (
+      <div className="p-6 md:p-8 max-w-4xl mx-auto">
+        <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center space-y-3">
+          <GitFork className="w-8 h-8 mx-auto text-indigo-500" />
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Course Flow Map</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400">Upload course material first. The prerequisite map will be built from the topics and prerequisite links extracted from your sources.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6">
@@ -146,9 +156,9 @@ export const CourseFlowMapPage: React.FC<CourseFlowMapPageProps> = ({
         {/* SVG DAG Visualizer */}
         <div className="overflow-x-auto p-8 min-h-[460px] flex items-center justify-center">
           <svg
-            className="w-full max-w-5xl h-[420px] transition-transform duration-200 ease-out"
-            style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center' }}
-            viewBox="0 0 980 380"
+            className="w-full max-w-5xl transition-transform duration-200 ease-out"
+            style={{ height: Math.max(420, mapHeight + 40), transform: `scale(${zoomLevel})`, transformOrigin: 'center' }}
+            viewBox={`0 0 980 ${mapHeight}`}
           >
             <defs>
               <marker

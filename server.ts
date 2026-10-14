@@ -9,8 +9,108 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import { inflateRawSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 
 dotenv.config();
+
+interface SourceLocationMetadata {
+  type: 'pdf' | 'pptx' | 'image' | 'video' | 'text' | 'youtube';
+  pageCount?: number;
+  slideNumbers?: Set<number>;
+  lineCount?: number;
+  captionTimes?: number[];
+}
+
+function parseTimestampSeconds(value: string): number | null {
+  const match = value.match(/(?:^|\b)((?:\d{1,2}:)?\d{1,2}:\d{2})(?:\b|$)/);
+  if (!match) return null;
+  const parts = match[1].split(':').map(Number);
+  if (parts.some(part => !Number.isFinite(part))) return null;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return null;
+}
+
+function formatTimestampSeconds(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const remainder = safe % 60;
+  return hours > 0
+    ? String(hours) + ':' + String(minutes).padStart(2, '0') + ':' + String(remainder).padStart(2, '0')
+    : String(minutes) + ':' + String(remainder).padStart(2, '0');
+}
+
+function normalizeSourceLocation(sourceFile: string, sourceType: string, rawLocation: string, metadata?: SourceLocationMetadata): string | null {
+  if (metadata?.type === 'pdf' || sourceType === 'pdf') {
+    const page = rawLocation.match(/\bpage\s*#?\s*(\d+)\b/i)?.[1];
+    const pageNumber = Number(page);
+    if (!page || pageNumber < 1 || (metadata?.pageCount && pageNumber > metadata.pageCount)) return null;
+    return 'Page ' + pageNumber;
+  }
+  if (metadata?.type === 'pptx' || (/\.pptx$/i.test(sourceFile) && sourceType === 'slide')) {
+    const slide = rawLocation.match(/\bslide\s*#?\s*(\d+)\b/i)?.[1];
+    const slideNumber = Number(slide);
+    if (!slide || !metadata?.slideNumbers?.has(slideNumber)) return null;
+    return 'Slide ' + slideNumber;
+  }
+  if (metadata?.type === 'image' || (/\.(png|jpe?g|webp)$/i.test(sourceFile) && sourceType === 'slide')) return 'Image 1';
+  if (metadata?.type === 'text' || sourceType === 'text') {
+    const match = rawLocation.match(/\blines?\s*(\d+)(?:\s*[-–]\s*(\d+))?\b/i);
+    if (!match) return null;
+    const first = Number(match[1]), last = Number(match[2] || match[1]);
+    if (first < 1 || last < first || (metadata?.lineCount && last > metadata.lineCount)) return null;
+    return first === last ? 'Line ' + first : 'Lines ' + first + '-' + last;
+  }
+  if (metadata?.type === 'youtube' || sourceType === 'youtube') {
+    const seconds = parseTimestampSeconds(rawLocation);
+    const captionTimes = metadata?.captionTimes || [];
+    if (seconds === null || !captionTimes.length) return null;
+    const nearest = captionTimes.reduce((best, candidate) => Math.abs(candidate - seconds) < Math.abs(best - seconds) ? candidate : best, captionTimes[0]);
+    if (Math.abs(nearest - seconds) > 90) return null;
+    return formatTimestampSeconds(nearest);
+  }
+  if (metadata?.type === 'video' || sourceType === 'video') {
+    const seconds = parseTimestampSeconds(rawLocation);
+    return seconds === null ? null : formatTimestampSeconds(seconds);
+  }
+  return null;
+}
+
+
+function readZipEntries(input: Buffer): Map<string, Buffer> {
+  const entries = new Map<string, Buffer>();
+  const minOffset = Math.max(0, input.length - 65557);
+  let endOffset = -1;
+  for (let i = input.length - 22; i >= minOffset; i--) {
+    if (input.readUInt32LE(i) === 0x06054b50) { endOffset = i; break; }
+  }
+  if (endOffset < 0) throw new Error('Invalid PPTX archive: ZIP directory not found.');
+  const entryCount = input.readUInt16LE(endOffset + 10);
+  let cursor = input.readUInt32LE(endOffset + 16);
+  for (let i = 0; i < entryCount; i++) {
+    if (cursor + 46 > input.length || input.readUInt32LE(cursor) !== 0x02014b50) break;
+    const method = input.readUInt16LE(cursor + 10);
+    const compressedSize = input.readUInt32LE(cursor + 20);
+    const nameLength = input.readUInt16LE(cursor + 28);
+    const extraLength = input.readUInt16LE(cursor + 30);
+    const commentLength = input.readUInt16LE(cursor + 32);
+    const localOffset = input.readUInt32LE(cursor + 42);
+    const name = input.subarray(cursor + 46, cursor + 46 + nameLength).toString('utf8');
+    if (localOffset + 30 <= input.length && input.readUInt32LE(localOffset) === 0x04034b50) {
+      const localNameLength = input.readUInt16LE(localOffset + 26);
+      const localExtraLength = input.readUInt16LE(localOffset + 28);
+      const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+      const compressed = input.subarray(dataOffset, dataOffset + compressedSize);
+      if (method === 0) entries.set(name, Buffer.from(compressed));
+      else if (method === 8) entries.set(name, inflateRawSync(compressed));
+    }
+    cursor += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,116 +150,154 @@ app.get('/api/health', (req, res) => {
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, citations, mode, language, learnerMasteryLevel } = req.body;
+    if (!message || typeof message !== 'string') return res.status(400).json({ error: 'A question is required.' });
+    const safeCitations = Array.isArray(citations) ? citations.filter((c: any) => c && typeof c.excerpt === 'string' && c.excerpt.trim()) : [];
 
-    if (!ai) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
+    // A missing retrieval result is not permission to answer from general model knowledge.
+    if (!safeCitations.length) {
+      return res.json({
+        answer: 'I could not find a sufficiently relevant excerpt in the current course materials to answer this reliably. Try a more specific question or upload the relevant lecture, slide, or textbook page.',
+        citations: [],
+        isOutsideMaterial: true,
+        outsideKnowledgeContent: '',
+        suggestedFollowUps: ['Browse the knowledge base', 'Upload a relevant course source', 'Ask about a topic listed in your course'],
+        learnerAdaptationNote: 'No sufficiently relevant source was retrieved; source-grounded refusal applied.',
+      });
     }
+    if (!ai) return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
 
-    const citationsText = (citations || [])
-      .map((c: any, i: number) => `[Source ${i + 1}] (${c.source_file}, ${c.source_location})\nTitle: ${c.source_title}\nExcerpt: "${c.excerpt}"`)
-      .join('\n\n');
-
-    let modePrompt = 'Provide an authoritative, source-grounded academic explanation with step-by-step logic.';
-    if (mode === 'eli5') modePrompt = 'Explain in simple everyday intuitive terms without heavy jargon.';
-    if (mode === 'step_by_step') modePrompt = 'Explain in numbered sequential logical steps.';
-    if (mode === 'socratic') modePrompt = 'Ask guiding questions to help the student derive the answer from the excerpts.';
-
-    let langPrompt = '';
-    if (language === 'hi') langPrompt = 'Respond in formal Hindi (Devanagari script) with technical English terms preserved.';
-    if (language === 'hinglish') langPrompt = 'Respond in natural conversational Hinglish (Hindi in Latin script with English academic terms).';
-
-    const systemInstruction = `You are StudyPilot, an elite university tutor.
-CRITICAL GROUNDING RULES:
-1. Base your answer EXCLUSIVELY on the provided course sources below.
-2. Every claim must have an inline bracket citation like [1] or [2] matching the source index.
-3. If the sources do NOT contain enough information to answer, state clearly that it is not covered in the course syllabus.
-4. Adapt to the student's mastery level: ${learnerMasteryLevel}.
-5. Style: ${modePrompt}
-${langPrompt}`;
-
-    const prompt = `Course Sources:\n${citationsText}\n\nStudent Question: "${message}"`;
-
+    const citationsText = safeCitations.map((c: any, i: number) =>
+      '[Source ' + (i + 1) + '] (' + String(c.source_file || 'Unknown file') + ', ' + String(c.source_location || 'Unknown location') + ')\nTitle: ' + String(c.source_title || '') + '\nExcerpt: "' + String(c.excerpt).slice(0, 12000) + '"'
+    ).join('\n\n');
+    let modePrompt = 'Explain clearly using only the supplied excerpts.';
+    if (mode === 'eli5') modePrompt = 'Explain in simple everyday language, using only the supplied excerpts.';
+    if (mode === 'step_by_step') modePrompt = 'Explain in numbered steps. Every step must be supported by the supplied excerpts.';
+    if (mode === 'socratic') modePrompt = 'Ask a guiding question grounded in the supplied excerpts; do not add unsupported facts.';
+    if (mode === 'quiz_me') modePrompt = 'Briefly summarize the supplied excerpts and ask one check question, without revealing unsupported information.';
+    const langPrompt = language === 'hi'
+      ? 'Respond in Hindi (Devanagari), preserving technical English terms.'
+      : language === 'hinglish' ? 'Respond in conversational Hinglish.' : 'Respond in English.';
+    const systemInstruction = 'You are StudyPilot, a source-grounded academic tutor. Answer ONLY from the course excerpts provided. Do not use outside knowledge to fill gaps. If the excerpts do not support the requested answer, explicitly say the course materials do not establish it and do not guess. Cite each factual claim with [1], [2] matching the source list. Never claim a source supports something not present in its excerpt. Student mastery level: ' + String(learnerMasteryLevel || 'unknown') + '. Style: ' + modePrompt + ' ' + langPrompt;
     const response = await ai.models.generateContent({
       model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        systemInstruction,
-        temperature: 0.2, // low temperature for high grounding fidelity
-      },
+      contents: 'Course Sources:\n' + citationsText + '\n\nStudent Question: ' + message,
+      config: { systemInstruction, temperature: 0.1 },
     });
-
-    const answerText = response.text || '';
-
+    const answerText = response.text || 'The supplied excerpts do not contain enough information to answer that reliably.';
+    const insufficient = /not (?:covered|included|established|specified|supported)|do not contain enough|does not (?:cover|establish|support)|cannot determine from (?:the )?(?:provided|supplied) (?:sources|excerpts)/i.test(answerText);
     res.json({
       answer: answerText,
-      citations: citations || [],
-      isOutsideMaterial: false,
-      suggestedFollowUps: [
-        'How does this connect to previous topics?',
-        'Can you show a mathematical edge case?',
-        'Quiz me on this concept',
-      ],
-      learnerAdaptationNote: `Adapted for ${learnerMasteryLevel} mastery.`,
+      citations: safeCitations,
+      isOutsideMaterial: insufficient,
+      outsideKnowledgeContent: '',
+      suggestedFollowUps: ['How does this connect to a prerequisite topic?', 'Quiz me on this concept', 'Show the exact source excerpt'],
+      learnerAdaptationNote: 'Explanation tailored to ' + String(learnerMasteryLevel || 'your') + ' mastery level and constrained to retrieved excerpts.',
     });
   } catch (err: any) {
     console.error('Chat API Error:', err);
-    res.status(500).json({ error: err.message || 'Error processing chat request' });
+    res.status(500).json({ error: err.message || 'Error generating chat response' });
   }
 });
 
-// Adaptive Quiz Generation Endpoint
+// Adaptive Quiz Generation Endpoint with independent second-pass verification
 app.post('/api/generate-quiz', async (req, res) => {
   try {
-    const { topicIds, count, difficulty, pastQuestionIds } = req.body;
-
-    if (!ai) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
+    const { topicIds = [], count = 5, difficulty = 'medium', pastQuestionIds = [], sourceUnits = [], questionTypes = ['mcq', 'short_answer', 'numerical'], topicMastery = [], diagnosticMode = false } = req.body;
+    if (!ai) return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
+    if (!Array.isArray(sourceUnits) || !sourceUnits.length) {
+      return res.status(400).json({ error: 'No source material is available for the selected topics. Upload or select course material first.' });
     }
-
-    const systemInstruction = `You are an expert exam author. Generate ${count || 3} challenging, strictly source-grounded academic exam questions for difficulty "${difficulty || 'medium'}".
-Return a JSON array of question objects adhering to this schema:
-[
-  {
-    "id": "q-gen-unique-id",
-    "type": "mcq",
-    "question": "Clear problem statement",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correct_answer": "0", // 0-indexed string
-    "worked_solution": "Step-by-step rigorous derivation",
-    "topic_id": "${topicIds?.[0] || 'topic-1'}",
-    "topic_name": "Course Topic",
-    "concept_tags": ["Concept1", "Concept2"],
-    "difficulty": "${difficulty || 'medium'}",
-    "source_location": "Slide 14",
-    "source_file": "Lecture14.pdf",
-    "source_type": "slide",
-    "is_verified": true,
-    "misconceptions": [
-      {
-        "option_index": 1,
-        "misconception_label": "Common error description",
-        "explanation": "Why this option is mathematically flawed",
-        "cited_source_location": "Slide 14"
-      }
-    ]
-  }
-]`;
-
-    const response = await ai.models.generateContent({
+    const requestedCount = Math.min(10, Math.max(1, Number(count) || 5));
+    const selectedUnits = sourceUnits.filter((u: any) => topicIds.includes(u.topic_id) && u.excerpt);
+    if (!selectedUnits.length) return res.status(422).json({ error: 'No source excerpts matched the selected topics.' });
+    const sourceContext = selectedUnits.slice(0, 60).map((u: any, i: number) =>
+      '[U' + i + '] id=' + u.id + '; topic=' + u.topic_name + ' (' + u.topic_id + '); source=' + u.source_file + '; location=' + u.source_location + '; concepts=' + JSON.stringify(u.concept_tags || []) + '\nExcerpt: ' + String(u.excerpt).slice(0, 5000)
+    ).join('\n\n');
+    const masteryByTopic = new Map<string, number>((Array.isArray(topicMastery) ? topicMastery : []).map((item: any): [string, number] => [String(item.topic_id), Math.max(0, Math.min(1, Number(item.mastery) || 0.25))]));
+    const adaptiveGuidance = [...new Set(selectedUnits.map((unit: any) => String(unit.topic_id)))].map(topicId => { const mastery = masteryByTopic.get(topicId) ?? 0.25; return topicId + ': mastery ' + Math.round(mastery * 100) + '%, target ' + (mastery < 0.4 ? 'foundational/easy questions' : mastery < 0.7 ? 'medium questions' : 'harder transfer questions'); }).join('; ');
+    const prompt = 'Create ' + requestedCount + ' new academic questions at difficulty ' + String(difficulty) + ' using ONLY the source excerpts below. ' + (diagnosticMode ? 'This is a first-session diagnostic: balance easy, medium, and hard questions across the selected topics to estimate baseline mastery. ' : '') + 'For adaptive difficulty, follow this per-topic learner guidance: ' + adaptiveGuidance + '. Allowed question types: ' + JSON.stringify(Array.isArray(questionTypes) ? questionTypes : ['mcq', 'short_answer', 'numerical']) + '. Only generate these requested types. Each question must be answerable from an excerpt and cite the exact source file/location and unit id. Do not make up source locations. Do not repeat any previous question identifiers: ' + JSON.stringify(pastQuestionIds) + '.\nReturn JSON array schema: [{ "id":"temporary-id","type":"mcq|short_answer|numerical","question":"...","options":["A","B","C","D"],"correct_answer":"0 for MCQ, otherwise concise answer","worked_solution":"source-grounded steps with source citations","topic_id":"...","topic_name":"...","concept_tags":["..."],"difficulty":"easy|medium|hard","source_location":"exact source location","source_file":"exact source file","source_type":"pdf|slide|video|youtube|text","unit_id":"exact source unit id","is_verified":false,"misconceptions":[{"option_index":1,"misconception_label":"...","explanation":"...","cited_source_location":"..."}]}]. For MCQ use four distinct options and a single correct option. Source excerpts:\n' + sourceContext;
+    const generated = await ai.models.generateContent({
       model: 'gemini-3.8-flash',
-      contents: `Generate ${count || 3} high quality questions for topics: ${JSON.stringify(topicIds)}. Do NOT repeat any question IDs: ${JSON.stringify(pastQuestionIds || [])}. Output pure JSON only.`,
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json',
-        temperature: 0.3,
-      },
+      contents: prompt,
+      config: { responseMimeType: 'application/json', temperature: 0.2 },
     });
+    const parsed = JSON.parse(generated.text || '[]');
+    if (!Array.isArray(parsed)) return res.status(502).json({ error: 'The question generator returned an invalid format.' });
+    const seen = new Set<string>(Array.isArray(pastQuestionIds) ? pastQuestionIds.map(String) : []);
+    const verified: any[] = [];
+    for (const candidate of parsed) {
+      if (verified.length >= requestedCount) break;
+      const source = selectedUnits.find((u: any) => u.id === candidate.unit_id);
+      if (!source || !candidate.question || !candidate.correct_answer || !candidate.worked_solution) continue;
+      const questionText = String(candidate.question).trim();
+      const stableId = 'q-' + createHash('sha256').update(questionText.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()).digest('hex').slice(0, 20);
+      if (seen.has(stableId)) continue;
+      if (!Array.isArray(questionTypes) || !questionTypes.includes(candidate.type)) continue;
+      const isMcq = candidate.type === 'mcq';
+      if (isMcq && (!Array.isArray(candidate.options) || candidate.options.length !== 4 || new Set(candidate.options.map(String)).size !== 4)) continue;
+      const answerIndex = isMcq ? Number(candidate.correct_answer) : -1;
+      if (isMcq && (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 3)) continue;
 
-    const parsed = JSON.parse(response.text || '[]');
-    res.json({ questions: parsed });
+      // Independent solve: verifier receives the problem and source excerpt, but never the proposed answer or solution.
+      const verificationPrompt = 'Independently solve the following question using only the source excerpt. You MUST NOT assume an answer key. Return JSON {"answer_index": number for MCQ or -1 for non-MCQ, "answer_text":"concise answer for non-MCQ", "supported_by_source":boolean, "reason":"brief source-based reason"}. Question: ' + questionText + '\nOptions: ' + JSON.stringify(isMcq ? candidate.options : []) + '\nSource excerpt: ' + String(source.excerpt).slice(0, 5000);
+      const verification = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: verificationPrompt,
+        config: { responseMimeType: 'application/json', temperature: 0 },
+      });
+      let check: any;
+      try { check = JSON.parse(verification.text || '{}'); } catch { continue; }
+      if (check.supported_by_source !== true) continue;
+      if (isMcq && Number(check.answer_index) !== answerIndex) continue;
+      if (!isMcq) {
+        const independentAnswer = String(check.answer_text || '').trim();
+        if (independentAnswer.length < 2) continue;
+        const generatedAnswer = String(candidate.correct_answer).trim();
+        if (candidate.type === 'numerical') {
+          const generatedNumber = generatedAnswer.replace(/,/g, '').match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/i)?.[0];
+          const solvedNumber = independentAnswer.replace(/,/g, '').match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/i)?.[0];
+          if (generatedNumber && solvedNumber) {
+            const a = Number(generatedNumber), b = Number(solvedNumber);
+            if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a - b) > Math.max(0.01, Math.abs(a) * 0.02)) continue;
+          } else {
+            const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9.]+/g, ' ').trim();
+            if (normalize(generatedAnswer) !== normalize(independentAnswer)) continue;
+          }
+        } else {
+          const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+          const expected = normalize(generatedAnswer);
+          const solved = normalize(independentAnswer);
+          const expectedTokens = new Set(expected.split(/\s+/).filter(Boolean));
+          const solvedTokens = new Set(solved.split(/\s+/).filter(Boolean));
+          const overlap = [...expectedTokens].filter(token => solvedTokens.has(token)).length / Math.max(1, Math.min(expectedTokens.size, solvedTokens.size));
+          if (expected !== solved && !expected.includes(solved) && !solved.includes(expected) && overlap < 0.6) continue;
+        }
+      }
+
+      const question = {
+        ...candidate,
+        id: stableId,
+        type: ['mcq', 'short_answer', 'numerical'].includes(candidate.type) ? candidate.type : 'mcq',
+        options: isMcq ? candidate.options.map(String) : undefined,
+        topic_id: source.topic_id,
+        topic_name: source.topic_name,
+        source_file: source.source_file,
+        source_location: source.source_location,
+        source_type: source.source_type,
+        unit_id: source.id,
+        concept_tags: Array.isArray(candidate.concept_tags) ? candidate.concept_tags.map(String) : source.concept_tags || [],
+        difficulty: diagnosticMode ? (['easy', 'medium', 'hard'][verified.length % 3]) : difficulty === 'adaptive' ? ((masteryByTopic.get(source.topic_id) ?? 0.25) < 0.4 ? 'easy' : (masteryByTopic.get(source.topic_id) ?? 0.25) < 0.7 ? 'medium' : 'hard') : (['easy', 'medium', 'hard'].includes(candidate.difficulty) ? candidate.difficulty : difficulty),
+        is_verified: true,
+        verification_notes: 'Independently solved in a second model pass without exposing the proposed answer key.',
+      };
+      seen.add(stableId);
+      verified.push(question);
+    }
+    if (!verified.length) return res.status(422).json({ error: 'No generated questions passed independent answer verification and source checks. Try a different topic or difficulty.' });
+    res.json({ questions: verified, requestedCount, verifiedCount: verified.length, verification: 'independent-second-pass' });
   } catch (err: any) {
     console.error('Quiz Generation Error:', err);
-    res.status(500).json({ error: err.message || 'Error generating quiz' });
+    res.status(500).json({ error: err.message || 'Error generating verified questions' });
   }
 });
 
@@ -173,10 +311,12 @@ app.post('/api/grade-answer', async (req, res) => {
     }
 
     const prompt = `Question: "${question.question}"
-Correct Answer / Worked Solution: "${question.worked_solution}"
+Correct answer: "${question.correct_answer}"
+Worked solution: "${question.worked_solution}"
+Course source: ${question.source_file || 'Unknown source'} (${question.source_location || 'Unknown location'})
 Student Answer: "${userAnswer}"
 
-Grade the student answer on a scale from 0.0 to 1.0 (with partial credit). Return JSON:
+Grade the student answer on a scale from 0.0 to 1.0 (with partial credit). Use only the provided worked solution. Include a source-location citation in feedback, and do not add unsupported facts. Return JSON:
 {
   "isCorrect": boolean,
   "partialScore": number,
@@ -193,10 +333,214 @@ Grade the student answer on a scale from 0.0 to 1.0 (with partial credit). Retur
     });
 
     const result = JSON.parse(response.text || '{}');
-    res.json(result);
+    const partialScore = Number(result.partialScore);
+    if (!Number.isFinite(partialScore)) return res.status(502).json({ error: 'The grader returned an invalid score.' });
+    const safeScore = Math.max(0, Math.min(1, partialScore));
+    res.json({
+      isCorrect: safeScore >= 0.7,
+      partialScore: safeScore,
+      feedback: String(result.feedback || 'Review the cited worked solution.').slice(0, 1200),
+    });
   } catch (err: any) {
     console.error('Grading Error:', err);
     res.status(500).json({ error: err.message || 'Error grading answer' });
+  }
+});
+
+
+app.post('/api/ingest', async (req, res) => {
+  try {
+    const body = req.body as { files?: Array<{ name: string; mimeType: string; data: string }>; youtubeUrls?: string[] };
+    const files = body.files || [];
+    const youtubeUrls = body.youtubeUrls || [];
+    if (!ai) return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
+    if (!Array.isArray(files) || !Array.isArray(youtubeUrls) || (!files.length && !youtubeUrls.length)) {
+      return res.status(400).json({ error: 'Add at least one supported file or YouTube URL.' });
+    }
+    if (files.length > 8) return res.status(400).json({ error: 'Upload up to 8 files per batch.' });
+    if (youtubeUrls.length > 5) return res.status(400).json({ error: 'Add up to 5 YouTube URLs per batch.' });
+    let totalUploadBytes = 0;
+
+    const parts: any[] = [];
+    const sourceNames: string[] = [];
+    const sourceTypes = new Map<string, string>();
+    const sourceMetadata = new Map<string, SourceLocationMetadata>();
+    const ingestionWarnings: string[] = [];
+    for (const file of files) {
+      if (!file?.name || !file?.mimeType || !file?.data) return res.status(400).json({ error: 'A file is missing its name, MIME type, or content.' });
+      const name = String(file.name).slice(0, 200);
+      const declaredMimeType = String(file.mimeType);
+      const extension = name.split('.').pop()?.toLowerCase() || '';
+      const extensionMimeTypes: Record<string, string> = {
+        pdf: 'application/pdf', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        mp4: 'video/mp4', mov: 'video/quicktime', png: 'image/png', jpg: 'image/jpeg',
+        jpeg: 'image/jpeg', txt: 'text/plain', md: 'text/markdown',
+      };
+      const mimeType = declaredMimeType === 'application/octet-stream' ? (extensionMimeTypes[extension] || declaredMimeType) : declaredMimeType;
+      if (!extensionMimeTypes[extension]) return res.status(415).json({ error: 'Unsupported file extension: ' + name });
+      const bytes = Buffer.from(String(file.data).replace(/^data:[^;]+;base64,/, ''), 'base64');
+      if (!bytes.length) return res.status(400).json({ error: 'Could not read ' + name + '.' });
+      if (bytes.length > 18 * 1024 * 1024) return res.status(413).json({ error: name + ' exceeds the 18 MB per-file inline ingestion limit. Compress or split it.' });
+      totalUploadBytes += bytes.length;
+      if (totalUploadBytes > 32 * 1024 * 1024) return res.status(413).json({ error: 'Combined file size exceeds the 32 MB batch limit. Process fewer files at a time.' });
+
+      if (mimeType.includes('presentation') || name.toLowerCase().endsWith('.pptx')) {
+        const zipEntries = readZipEntries(bytes);
+        const slidePaths = [...zipEntries.keys()].filter(p => /^ppt\/slides\/slide\d+\.xml$/.test(p))
+          .sort((a, b) => Number(a.match(/slide(\d+)/)?.[1]) - Number(b.match(/slide(\d+)/)?.[1]));
+        const slideNumbers = new Set<number>();
+        for (const slidePath of slidePaths) {
+          const slideNumber = Number(slidePath.match(/slide(\d+)/)?.[1] || 0);
+          if (slideNumber > 0) slideNumbers.add(slideNumber);
+          const xml = zipEntries.get(slidePath)?.toString('utf8') || '';
+          const slideText = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(match => match[1]
+            .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")).join(' ');
+          if (slideText.trim()) parts.push({ text: 'PowerPoint source "' + name + '", Slide ' + slideNumber + ' extracted text:\n' + slideText });
+          // Follow each slide's own relationship file so figures are not assigned to the wrong slide.
+          const relationshipPath = 'ppt/slides/_rels/' + slidePath.split('/').pop() + '.rels';
+          const relationshipXml = zipEntries.get(relationshipPath)?.toString('utf8') || '';
+          const relationships = new Map<string, string>();
+          for (const match of relationshipXml.matchAll(/<Relationship\b(?=[^>]*\bId="([^"]+)")(?=[^>]*\bTarget="([^"]+)")[^>]*\/?\s*>/g)) {
+            const target = match[2];
+            if (/\.(png|jpe?g|webp)$/i.test(target)) {
+              const mediaPath = target.startsWith('/') ? target.slice(1) : path.posix.normalize(path.posix.join('ppt/slides', target));
+              relationships.set(match[1], mediaPath);
+            }
+          }
+          const embeddedIds = [...xml.matchAll(/<a:blip\b[^>]*\br:embed="([^"]+)"/g)].map(match => match[1]);
+          for (const relationshipId of embeddedIds) {
+            const mediaPath = relationships.get(relationshipId);
+            const mediaBytes = mediaPath ? zipEntries.get(mediaPath) : undefined;
+            if (!mediaPath || !mediaBytes || mediaBytes.length === 0 || mediaBytes.length > 4 * 1024 * 1024) continue;
+            const extension = mediaPath.split('.').pop()?.toLowerCase();
+            const imageMime = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : extension === 'webp' ? 'image/webp' : 'image/png';
+            parts.push({ text: 'Embedded visual from "' + name + '", Slide ' + slideNumber + '. Describe only the visible image/diagram and ground any explanation in this slide.' });
+            parts.push({ inlineData: { mimeType: imageMime, data: mediaBytes.toString('base64') } });
+          }
+        }
+        sourceMetadata.set(name, { type: 'pptx', slideNumbers });
+        if (!slidePaths.length) ingestionWarnings.push('No slide XML files were found in ' + name + '.');
+      } else if (mimeType === 'application/pdf' || mimeType.startsWith('image/') || mimeType.startsWith('video/')) {
+        if (mimeType === 'application/pdf') {
+          const pageCount = [...bytes.toString('latin1').matchAll(/\/Type\s*\/Page\b/g)].length;
+          sourceMetadata.set(name, { type: 'pdf', pageCount });
+          if (!pageCount) ingestionWarnings.push('PDF page count could not be independently confirmed for ' + name + '. Page citations will be checked for valid numbering but should be reviewed.');
+        } else if (mimeType.startsWith('image/')) sourceMetadata.set(name, { type: 'image' });
+        else sourceMetadata.set(name, { type: 'video' });
+        if (mimeType.startsWith('video/') && bytes.length > 18 * 1024 * 1024) return res.status(413).json({ error: 'Video is too large for inline processing: ' + name });
+        parts.push({ text: 'Analyze source file "' + name + '". Only report page, figure, slide, or timestamp locations supported by the supplied content.' });
+        parts.push({ inlineData: { mimeType, data: bytes.toString('base64') } });
+      } else if (mimeType.startsWith('text/')) {
+        const textContent = bytes.toString('utf8').slice(0, 120000);
+        const lineCount = textContent.split(/\r?\n/).length;
+        sourceMetadata.set(name, { type: 'text', lineCount });
+        parts.push({ text: 'Source file "' + name + '". Cite exact line ranges in this text:\n' + textContent.split(/\r?\n/).map((line, index) => '[' + (index + 1) + '] ' + line).join('\n') });
+      } else {
+        return res.status(415).json({ error: 'Unsupported file type: ' + name + '. Use PDF, PPTX, MP4/MOV, PNG/JPG, or text files.' });
+      }
+      sourceNames.push(name);
+      sourceTypes.set(name, name.toLowerCase().endsWith('.pptx') ? 'slide' : mimeType === 'application/pdf' ? 'pdf' : mimeType.startsWith('image/') ? 'slide' : mimeType.startsWith('video/') ? 'video' : mimeType.startsWith('text/') || /\\.(txt|md)$/i.test(name) ? 'text' : 'pdf');
+    }
+
+    for (const urlValue of youtubeUrls) {
+      const url = String(urlValue).trim();
+      if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(url)) return res.status(400).json({ error: 'Not a valid YouTube URL: ' + url });
+      const videoId = url.match(/(?:v=|youtu\.be\/|shorts\/)([A-Za-z0-9_-]{11})/)?.[1];
+      let transcriptAdded = false;
+      if (videoId) {
+        try {
+          const transcriptResponse = await fetch('https://www.youtube.com/api/timedtext?lang=en&v=' + videoId);
+          if (transcriptResponse.ok) {
+            const xml = await transcriptResponse.text();
+            const entries = [...xml.matchAll(/<text[^>]*start="([0-9.]+)"[^>]*>([\s\S]*?)<\/text>/g)];
+            const transcript = entries.map(match => {
+              const seconds = Number(match[1]);
+              const stamp = Math.floor(seconds / 60) + ':' + String(Math.floor(seconds % 60)).padStart(2, '0');
+              const text = match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+              return '[' + stamp + '] ' + text;
+            }).join('\n');
+            if (transcript.trim()) {
+              sourceMetadata.set(url, { type: 'youtube', captionTimes: entries.map(match => Number(match[1])).filter(seconds => Number.isFinite(seconds) && seconds >= 0) });
+              parts.push({ text: 'Actual English caption transcript for YouTube video ' + url + '. Timestamps come from the caption track.\n' + transcript.slice(0, 100000) });
+              transcriptAdded = true;
+            }
+          }
+        } catch (transcriptError) {
+          console.warn('YouTube caption retrieval failed for', url, transcriptError);
+        }
+      }
+      if (!transcriptAdded) ingestionWarnings.push('Could not retrieve an available English caption track for ' + url + '. No transcript-based content was generated for this link; upload a transcript or video file to ingest it.');
+      sourceNames.push(url);
+      if (transcriptAdded) sourceTypes.set(url, 'youtube');
+    }
+
+    if (!parts.length) return res.status(422).json({ error: 'No readable source content was available to process.', warnings: ingestionWarnings });
+
+    const systemInstruction = 'You are StudyPilot, a source-faithful course material ingestion engine. Analyze only supplied materials; never invent facts, page numbers, slide numbers, timestamps, or diagrams. Cite PDF page indices as Page N, PPTX slide numbers as Slide N, text/Markdown as Line N or Lines N-M using the supplied line labels, image files as Image 1, and videos/YouTube as MM:SS or HH:MM:SS timestamps. Only return locations that appear in the supplied source. Return only valid JSON: {"topics":[{"id":"topic-slug","title":"...","description":"...","subtopics":["..."],"concepts":["..."],"estimated_study_minutes":15,"prerequisite_ids":[]}],"units":[{"id":"unique-id","title":"...","summary":"...","full_text_excerpt":"...","topic_id":"matching topic id","topic_name":"...","subtopic":"...","concept_tags":["..."],"difficulty":"easy|medium|hard","source_type":"pdf|slide|video|youtube|text","source_file":"exact filename or URL","source_location":"PDF: Page N; PPTX: Slide N; text/Markdown: Line N or Lines N-M; image: Image 1; video/YouTube: MM:SS or HH:MM:SS","video_timestamp_seconds":0,"youtube_video_id":"if known","is_figure":false,"figure_caption":""}],"warnings":[]} Create up to 12 meaningful units per source and 1-8 topics. Keep each excerpt grounded in the actual material. Do not create units for inaccessible URLs.';
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: [{ role: 'user', parts: [...parts, { text: 'Ingest these sources: ' + sourceNames.join(', ') + '. Return structured, grounded units and topics.' }] }],
+      config: { systemInstruction, responseMimeType: 'application/json', temperature: 0.1 },
+    });
+    const parsed = JSON.parse(response.text || '{}');
+    const topics = Array.isArray(parsed.topics) ? parsed.topics : [];
+    const units = Array.isArray(parsed.units) ? parsed.units : [];
+    const warnings = [...ingestionWarnings, ...(Array.isArray(parsed.warnings) ? parsed.warnings.map(String) : [])];
+    if (!units.length) return res.status(422).json({ error: 'No grounded content units could be extracted from these sources.', warnings });
+    if (!topics.length) return res.status(422).json({ error: 'No course topics could be identified. Try a source with more readable content.', warnings });
+
+    const ingestionId = Date.now().toString(36);
+    const topicIdMap = new Map<string, string>();
+    topics.forEach((topic: any, index: number) => {
+      topicIdMap.set(String(topic.id || '__missing_' + index), 'ingested-topic-' + ingestionId + '-' + (index + 1));
+    });
+    const safeTopics = topics.map((t: any, i: number) => ({
+      id: topicIdMap.get(String(t.id || '__missing_' + i)) || ('ingested-topic-' + ingestionId + '-' + (i + 1)),
+      title: String(t.title || 'Untitled topic'),
+      description: String(t.description || ''),
+      subtopics: Array.isArray(t.subtopics) ? t.subtopics.map(String) : [],
+      concepts: Array.isArray(t.concepts) ? t.concepts.map(String) : [],
+      estimated_study_minutes: Math.max(1, Math.min(600, Number(t.estimated_study_minutes) || 15)),
+      prerequisite_ids: Array.isArray(t.prerequisite_ids) ? t.prerequisite_ids.map(String).map((id: string) => topicIdMap.get(id)).filter((id: string | undefined): id is string => Boolean(id)) : [],
+      unit_count: 0,
+    }));
+    const topicNames = new Map(safeTopics.map((t: any) => [t.id, t.title]));
+    const safeUnits = units.filter((u: any) => sourceTypes.has(String(u.source_file || ''))).map((u: any, i: number) => {
+      const sourceFile = String(u.source_file || '');
+      const sourceType = sourceTypes.get(sourceFile) || 'pdf';
+      const sourceLocation = normalizeSourceLocation(sourceFile, sourceType, String(u.source_location || ''), sourceMetadata.get(sourceFile));
+      if (!sourceLocation) {
+        ingestionWarnings.push('Skipped a content unit from ' + sourceFile + ' because its page, slide, line, or timestamp could not be validated.');
+        return null;
+      }
+      const topicId = topicIdMap.get(String(u.topic_id || '')) || safeTopics[0]?.id || 'ingested-topic';
+      const unit: any = {
+        id: 'ingested-unit-' + ingestionId + '-' + (i + 1),
+        title: String(u.title || 'Untitled content'),
+        summary: String(u.summary || ''),
+        full_text_excerpt: String(u.full_text_excerpt || ''),
+        topic_id: topicId,
+        topic_name: String(topicNames.get(topicId) || u.topic_name || 'Course material'),
+        subtopic: String(u.subtopic || ''),
+        concept_tags: Array.isArray(u.concept_tags) ? u.concept_tags.map(String) : [],
+        difficulty: ['easy', 'medium', 'hard'].includes(u.difficulty) ? u.difficulty : 'medium',
+        source_type: sourceType,
+        source_file: sourceFile,
+        source_location: sourceLocation,
+      };
+      const seconds = parseTimestampSeconds(sourceLocation);
+      if (seconds !== null && (sourceType === 'video' || sourceType === 'youtube')) unit.video_timestamp_seconds = seconds;
+      const sourceVideoId = sourceType === 'youtube' ? sourceFile.match(/(?:v=|youtu\.be\/|shorts\/)([A-Za-z0-9_-]{11})/)?.[1] : undefined;
+      if (sourceVideoId) unit.youtube_video_id = sourceVideoId;
+      if (u.is_figure) { unit.is_figure = true; unit.figure_caption = String(u.figure_caption || ''); }
+      return unit;
+    }).filter((unit: any) => unit !== null);
+    if (!safeUnits.length) return res.status(422).json({ error: 'No content units had both a readable source and a validated source location.', warnings });
+    for (const topic of safeTopics) topic.unit_count = safeUnits.filter((u: any) => u.topic_id === topic.id).length;
+    return res.json({ topics: safeTopics, units: safeUnits, warnings, sourceCount: sourceNames.length });
+  } catch (err: any) {
+    console.error('Ingestion API Error:', err);
+    return res.status(500).json({ error: err.message || 'Error processing course materials' });
   }
 });
 

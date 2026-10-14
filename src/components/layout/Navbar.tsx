@@ -1,11 +1,10 @@
 /**
  * StudyPilot - Top Navigation Bar
- * Implements the Top Bar Contract with Global Search (Cmd+K),
- * Language Switcher, Dark/Light Mode, Demo Mode Trigger, and Learner Streak.
+ * Provides global search, language selection, theme controls, and architecture guidance.
  */
 
 import React from 'react';
-import { Search, Flame, Moon, Sun, Sparkles, Network, Globe } from 'lucide-react';
+import { Search, Flame, Moon, Sun, Network, Globe } from 'lucide-react';
 import { useAppStore } from '../../store/useStore';
 import { LanguageMode } from '../../types';
 
@@ -22,7 +21,6 @@ export const Navbar: React.FC<NavbarProps> = ({ store, onOpenSearch, onOpenArch 
     language,
     setLanguage,
     learnerProfile,
-    resetToDemoMode,
     course,
   } = store;
 
@@ -40,7 +38,7 @@ export const Navbar: React.FC<NavbarProps> = ({ store, onOpenSearch, onOpenArch 
         </div>
         <span className="text-slate-300 dark:text-slate-700 hidden sm:inline">|</span>
         <span className="text-xs font-medium text-slate-500 dark:text-slate-400 hidden lg:inline truncate max-w-xs">
-          {course.code}: {course.title}
+          {course.code ? course.code + ': ' : ''}{course.title}
         </span>
       </div>
 
@@ -70,16 +68,6 @@ export const Navbar: React.FC<NavbarProps> = ({ store, onOpenSearch, onOpenArch 
         >
           <Network className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">How It Works</span>
-        </button>
-
-        {/* Demo Mode Button */}
-        <button
-          onClick={resetToDemoMode}
-          title="Reload Stanford CS229 Preloaded Course with 30-Day History"
-          className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-cyan-600 dark:text-cyan-300 bg-cyan-50 dark:bg-cyan-950/40 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 rounded-lg border border-cyan-200/60 dark:border-cyan-800/50 transition-colors cursor-pointer"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>Demo Course</span>
         </button>
 
         {/* Language Selector */}
