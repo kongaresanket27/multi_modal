@@ -32,9 +32,9 @@ export async function askGroundedTutor(
       isOutsideMaterial: true,
       outsideKnowledgeContent: `This query appears to fall outside your syllabus. To maintain academic rigor and exam fidelity, StudyPilot strictly separates outside concepts from your course sources.\n\nGeneral Knowledge Summary:\n"${question}" is an external concept. If you would like to include it in your course knowledge base, you can upload the relevant textbook chapter or lecture slides in the Knowledge Base tab.`,
       suggestedFollowUps: [
-        'Ask about Computational Graphs & Backprop',
-        'Ask about Loss Landscapes & Saddle Points',
-        'Ask about Transformer Multi-Head Attention',
+        'Upload a source that covers this topic',
+        'Browse your uploaded course topics',
+        'Ask about one of the retrieved excerpts',
       ],
       learnerAdaptationNote: 'Query outside course scope - grounded refusal active.',
     };
