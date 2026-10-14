@@ -7,17 +7,7 @@
  */
 
 import React, { useState } from 'react';
-import {
-  BarChart3,
-  ShieldCheck,
-  CheckCircle2,
-  Users,
-  TrendingUp,
-  Cpu,
-  RefreshCw,
-  Sparkles,
-  Info,
-} from 'lucide-react';
+import { ShieldCheck, Users, RefreshCw, FileText } from 'lucide-react';
 import { BENCHMARK_EVALUATION_METRICS, SIMULATED_STUDENT_PROFILES } from '../services/geminiService';
 import { updateBKT } from '../learner/bkt';
 import { EvaluationMetric } from '../types';
@@ -135,7 +125,7 @@ export const EvaluationBenchPage: React.FC = () => {
             System Evaluation Benchmark
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Import RAGAS JSON results below. Until imported, framework metrics remain unmeasured; cohort results are synthetic simulations.
+            Import measured RAGAS JSON and retrieval/refusal results. Imported values show the sample size and method; cohort results remain synthetic simulations.
           </p>
         </div>
 
