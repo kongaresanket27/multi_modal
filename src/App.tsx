@@ -136,6 +136,7 @@ export default function App() {
               onNavigateToQuiz={handleLaunchQuizForTopic}
               onNavigateToTutor={handleAskTutorWithQuery}
               onNavigateToCourseMap={() => setActiveTab('course_map')}
+              onNavigateToIngestion={() => setActiveTab('ingestion')}
             />
           )}
 
