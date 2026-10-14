@@ -46,7 +46,7 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({ store, onExploreKn
         setError('A batch can contain up to 8 files and 32 MB total. Remove files or ingest in smaller batches.');
         continue;
       }
-      if ([...currentFiles.map(source => source.file.name), ...accepted.map(item => item.name)].includes(file.name)) {
+      if ([...currentFiles.map(source => source.file.name), ...accepted.map(item => item.name)].includes(file.name) || course.content_units.some(unit => unit.source_file === file.name)) {
         setError('A file named "' + file.name + '" is already queued. Rename duplicate files so citations remain unambiguous.');
         continue;
       }
@@ -116,7 +116,7 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({ store, onExploreKn
 
   const removeSource = (id: string) => {
     const source = sources.find(item => item.id === id);
-    if (source?.kind === 'file') unregisterSourceFile(source.file.name);
+    if (source?.kind === 'file' && !course.content_units.some(unit => unit.source_file === source.file.name)) unregisterSourceFile(source.file.name);
     setSources(prev => prev.filter(source => source.id !== id));
     setIsCompleted(false);
   };
