@@ -6,7 +6,6 @@
  */
 
 import { Citation, Question, QuizSubmission, EvaluationMetric, SimulatedStudentProfile, ContentUnit } from '../types';
-import { SAMPLE_QUESTIONS_POOL } from '../demo-data/sampleCourse';
 
 export interface ChatResponsePayload {
   answer: string;
@@ -110,48 +109,31 @@ export async function generateAdaptiveQuestions(
   pastQuestionIds: Set<string>,
   sourceUnits: ContentUnit[] = []
 ): Promise<Question[]> {
-  try {
-    const res = await fetch('/api/generate-quiz', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        topicIds,
-        count,
-        difficulty,
-        pastQuestionIds: Array.from(pastQuestionIds),
-        sourceUnits: sourceUnits.filter(unit => topicIds.includes(unit.topic_id)).map(unit => ({ id: unit.id, title: unit.title, summary: unit.summary, excerpt: unit.full_text_excerpt, topic_id: unit.topic_id, topic_name: unit.topic_name, source_file: unit.source_file, source_location: unit.source_location, source_type: unit.source_type, concept_tags: unit.concept_tags })),
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.questions) && data.questions.length > 0) {
-        return data.questions;
-      }
-      throw new Error(data.error || 'No verified questions could be generated from the selected source material.');
-    }
-  } catch (err) {
-    console.error('Grounded quiz generation failed:', err);
-    throw err instanceof Error ? err : new Error('Grounded quiz generation failed.');
-  }
-
-  /* Demo fallback intentionally disabled: quiz questions must be generated from the active course sources. */
-  /* Filter pool matching selected topics & unattempted
-  let available = SAMPLE_QUESTIONS_POOL.filter(q => {
-    const matchesTopic = topicIds.length === 0 || topicIds.includes(q.topic_id);
-    return matchesTopic && !pastQuestionIds.has(q.id);
+  const relevantUnits = sourceUnits.filter(unit => topicIds.includes(unit.topic_id));
+  if (!relevantUnits.length) throw new Error('No course excerpts are available for the selected topics. Upload course material first.');
+  const res = await fetch('/api/generate-quiz', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      topicIds,
+      count,
+      difficulty,
+      pastQuestionIds: Array.from(pastQuestionIds),
+      sourceUnits: relevantUnits.map(unit => ({
+        id: unit.id, title: unit.title, summary: unit.summary,
+        excerpt: unit.full_text_excerpt, topic_id: unit.topic_id,
+        topic_name: unit.topic_name, source_file: unit.source_file,
+        source_location: unit.source_location, source_type: unit.source_type,
+        concept_tags: unit.concept_tags,
+      })),
+    }),
   });
-
-  if (available.length < count) {
-    // Fall back to all matching questions
-    available = SAMPLE_QUESTIONS_POOL.filter(q => topicIds.length === 0 || topicIds.includes(q.topic_id));
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Grounded quiz generation failed.');
+  if (!Array.isArray(data.questions) || !data.questions.length) {
+    throw new Error('No questions passed independent verification. Try another topic or difficulty.');
   }
-
-  // If still fewer, take all pool
-  if (available.length === 0) {
-    available = [...SAMPLE_QUESTIONS_POOL];
-  }
-
-  return available.slice(0, count); */
+  return data.questions as Question[];
 }
 
 export async function gradeOpenEndedAnswer(
