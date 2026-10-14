@@ -91,7 +91,8 @@ export async function generateAdaptiveQuestions(
   count: number,
   difficulty: 'easy' | 'medium' | 'hard' | 'adaptive',
   pastQuestionIds: Set<string>,
-  sourceUnits: ContentUnit[] = []
+  sourceUnits: ContentUnit[] = [],
+  questionTypes: QuestionType[] = ['mcq', 'short_answer', 'numerical']
 ): Promise<Question[]> {
   const relevantUnits = sourceUnits.filter(unit => topicIds.includes(unit.topic_id));
   if (!relevantUnits.length) throw new Error('No course excerpts are available for the selected topics. Upload course material first.');
@@ -102,6 +103,7 @@ export async function generateAdaptiveQuestions(
       topicIds,
       count,
       difficulty,
+      questionTypes,
       pastQuestionIds: Array.from(pastQuestionIds),
       sourceUnits: relevantUnits.map(unit => ({
         id: unit.id, title: unit.title, summary: unit.summary,
