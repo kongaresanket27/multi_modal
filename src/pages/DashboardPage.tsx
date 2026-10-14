@@ -83,7 +83,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const topicsDueCount = topicMastery.filter(t => t.review_due_timestamp <= Date.now() + 24 * 3600 * 1000).length;
 
   // Recommended next topic (lowest mastery with prerequisites satisfied)
-  const recommendedTopicState = weakTopics[0] || topicMastery[0];
+  const recommendedTopicState = weakTopics[0] || topicMastery[0] || { topic_id: course.topics[0]?.id || '', mastery: 0.25 };
   const recommendedTopicInfo = course.topics.find(t => t.id === recommendedTopicState.topic_id);
 
   // Exam Countdown calculation
@@ -194,7 +194,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             {learnerProfile.current_streak_days} <span className="text-sm font-semibold text-slate-400">days</span>
           </p>
           <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
-            Active today · Goal: 7 days
+            Weekly goal: {learnerProfile.weekly_goal_hours} hours
           </p>
         </div>
 
@@ -234,7 +234,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 {recommendedTopicInfo.title}
               </h3>
               <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
-                Why this now: Your current mastery is {Math.round(recommendedTopicState.mastery * 100)}% (Critical threshold). Reviewing Query-Key-Value attention is required before advancing to Representation Learning.
+                Why this now: your estimated mastery is {Math.round(recommendedTopicState.mastery * 100)}%. Review this topic to strengthen retention before moving on.
               </p>
             </div>
           </div>
