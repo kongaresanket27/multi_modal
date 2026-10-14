@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "evaluate:retrieval": "tsx evaluation/run-retrieval-benchmark.ts"
+    "evaluate:retrieval": "tsx evaluation/run-retrieval-benchmark.ts",
+    "evaluate:ragas:collect": "tsx evaluation/collect-ragas-input.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
