@@ -133,7 +133,7 @@ app.post('/api/chat', async (req, res) => {
     res.status(500).json({ error: err.message || 'Er// Adaptive Quiz Generation Endpoint with independent second-pass verification
 app.post('/api/generate-quiz', async (req, res) => {
   try {
-    const { topicIds = [], count = 5, difficulty = 'medium', pastQuestionIds = [], sourceUnits = [] } = req.body;
+    const { topicIds = [], count = 5, difficulty = 'medium', pastQuestionIds = [], sourceUnits = [], questionTypes = ['mcq', 'short_answer', 'numerical'] } = req.body;
     if (!ai) return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
     if (!Array.isArray(sourceUnits) || !sourceUnits.length) {
       return res.status(400).json({ error: 'No source material is available for the selected topics. Upload or select course material first.' });
@@ -144,7 +144,7 @@ app.post('/api/generate-quiz', async (req, res) => {
     const sourceContext = selectedUnits.slice(0, 60).map((u: any, i: number) =>
       '[U' + i + '] id=' + u.id + '; topic=' + u.topic_name + ' (' + u.topic_id + '); source=' + u.source_file + '; location=' + u.source_location + '; concepts=' + JSON.stringify(u.concept_tags || []) + '\nExcerpt: ' + String(u.excerpt).slice(0, 5000)
     ).join('\n\n');
-    const prompt = 'Create ' + requestedCount + ' new academic questions at difficulty ' + String(difficulty) + ' using ONLY the source excerpts below. Mix MCQ, short_answer, and numerical question types when supported. Each question must be answerable from an excerpt and cite the exact source file/location and unit id. Do not make up source locations. Do not repeat any previous question identifiers: ' + JSON.stringify(pastQuestionIds) + '.\nReturn JSON array schema: [{ "id":"temporary-id","type":"mcq|short_answer|numerical","question":"...","options":["A","B","C","D"],"correct_answer":"0 for MCQ, otherwise concise answer","worked_solution":"source-grounded steps with source citations","topic_id":"...","topic_name":"...","concept_tags":["..."],"difficulty":"easy|medium|hard","source_location":"exact source location","source_file":"exact source file","source_type":"pdf|slide|video|youtube|text","unit_id":"exact source unit id","is_verified":false,"misconceptions":[{"option_index":1,"misconception_label":"...","explanation":"...","cited_source_location":"..."}]}]. For MCQ use four distinct options and a single correct option. Source excerpts:\n' + sourceContext;
+    const prompt = 'Create ' + requestedCount + ' new academic questions at difficulty ' + String(difficulty) + ' using ONLY the source excerpts below. Allowed question types: ' + JSON.stringify(Array.isArray(questionTypes) ? questionTypes : ['mcq', 'short_answer', 'numerical']) + '. Only generate these requested types. Each question must be answerable from an excerpt and cite the exact source file/location and unit id. Do not make up source locations. Do not repeat any previous question identifiers: ' + JSON.stringify(pastQuestionIds) + '.\nReturn JSON array schema: [{ "id":"temporary-id","type":"mcq|short_answer|numerical","question":"...","options":["A","B","C","D"],"correct_answer":"0 for MCQ, otherwise concise answer","worked_solution":"source-grounded steps with source citations","topic_id":"...","topic_name":"...","concept_tags":["..."],"difficulty":"easy|medium|hard","source_location":"exact source location","source_file":"exact source file","source_type":"pdf|slide|video|youtube|text","unit_id":"exact source unit id","is_verified":false,"misconceptions":[{"option_index":1,"misconception_label":"...","explanation":"...","cited_source_location":"..."}]}]. For MCQ use four distinct options and a single correct option. Source excerpts:\n' + sourceContext;
     const generated = await ai.models.generateContent({
       model: 'gemini-3.8-flash',
       contents: prompt,
@@ -161,6 +161,7 @@ app.post('/api/generate-quiz', async (req, res) => {
       const questionText = String(candidate.question).trim();
       const stableId = 'q-' + createHash('sha256').update(questionText.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()).digest('hex').slice(0, 20);
       if (seen.has(stableId)) continue;
+      if (!Array.isArray(questionTypes) || !questionTypes.includes(candidate.type)) continue;
       const isMcq = candidate.type === 'mcq';
       if (isMcq && (!Array.isArray(candidate.options) || candidate.options.length !== 4 || new Set(candidate.options.map(String)).size !== 4)) continue;
       const answerIndex = isMcq ? Number(candidate.correct_answer) : -1;
