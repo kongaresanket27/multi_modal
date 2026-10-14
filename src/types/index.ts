@@ -145,6 +145,7 @@ export interface QuizSubmission {
   topic_ids: string[];
   answers: {
     question_id: string;
+    topic_id?: string;
     user_answer: string;
     is_correct: boolean;
     partial_score?: number;
