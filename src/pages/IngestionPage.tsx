@@ -85,7 +85,7 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({ store, onExploreKn
     try {
       const files = await Promise.all(sources.filter((s): s is Extract<QueuedSource, { kind: 'file' }> => s.kind === 'file').map(async ({ file }) => ({
         name: file.name,
-        mimeType: file.type || (file.name.toLowerCase().endsWith('.pptx') ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : 'application/octet-stream'),
+        mimeType: file.type || ({ pdf: 'application/pdf', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', mp4: 'video/mp4', mov: 'video/quicktime', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', txt: 'text/plain', md: 'text/markdown' } as Record<string, string>)[file.name.split('.').pop()?.toLowerCase() || ''] || 'application/octet-stream',
         data: await toBase64(file),
       })));
       const youtubeUrls = sources.filter((s): s is Extract<QueuedSource, { kind: 'youtube' }> => s.kind === 'youtube').map(s => s.url);
