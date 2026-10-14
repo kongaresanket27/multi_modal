@@ -93,7 +93,8 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
         pastAnsweredQuestionIds,
         course.content_units,
         selectedTypes,
-        topicMastery
+        topicMastery,
+        isDiagnostic
       );
 
       const title = isDiagnostic
@@ -208,8 +209,9 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
             ].map((d) => (
               <button
                 key={d.id}
-                onClick={() => setDifficulty(d.id as any)}
-                className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                disabled={isDiagnostic && d.id !== 'adaptive'}
+                onClick={() => { if (!isDiagnostic) setDifficulty(d.id as any); }}
+                className={`p-3 rounded-xl border text-left transition-all ${isDiagnostic && d.id !== 'adaptive' ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${
                   difficulty === d.id
                     ? 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-500 text-indigo-900 dark:text-indigo-200 shadow-xs'
                     : 'bg-slate-50 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
