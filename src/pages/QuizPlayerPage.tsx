@@ -184,6 +184,7 @@ export const QuizPlayerPage: React.FC<QuizPlayerPageProps> = ({
         total_questions: questions.length,
         correct_questions: correctCount,
         topic_ids: Array.from(new Set(questions.map(q => q.topic_id))),
+        question_ids: questions.map(question => question.id),
         answers: recordedAnswers,
         topic_accuracies: topicAccuracies,
         mastery_deltas: masteryDeltas,
