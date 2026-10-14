@@ -2,6 +2,8 @@ name: RAGAS Evaluation
 
 on:
   workflow_dispatch:
+  push:
+    branches: [feature/real-ingestion-pipeline]
 
 permissions:
   contents: read
