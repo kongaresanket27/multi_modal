@@ -1,0 +1,6 @@
+{
+  "name": "SynapseAI - Multimodal Adaptive Tutor & Study Companion",
+  "description": "Unified multimodal study companion for lecture videos, textbooks, and slide decks with source-cited grounding, Bayesian Knowledge Tracing adaptive assessments, and RAGAS evaluation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
