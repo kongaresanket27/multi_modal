@@ -93,7 +93,8 @@ export async function generateAdaptiveQuestions(
   pastQuestionIds: Set<string>,
   sourceUnits: ContentUnit[] = [],
   questionTypes: QuestionType[] = ['mcq', 'short_answer', 'numerical'],
-  topicMastery: TopicMasteryState[] = []
+  topicMastery: TopicMasteryState[] = [],
+  diagnosticMode = false
 ): Promise<Question[]> {
   const relevantUnits = sourceUnits.filter(unit => topicIds.includes(unit.topic_id));
   if (!relevantUnits.length) throw new Error('No course excerpts are available for the selected topics. Upload course material first.');
@@ -106,6 +107,7 @@ export async function generateAdaptiveQuestions(
       difficulty,
       questionTypes,
       topicMastery: topicMastery.filter(state => topicIds.includes(state.topic_id)).map(state => ({ topic_id: state.topic_id, mastery: state.mastery })),
+      diagnosticMode,
       pastQuestionIds: Array.from(pastQuestionIds),
       sourceUnits: relevantUnits.map(unit => ({
         id: unit.id, title: unit.title, summary: unit.summary,
