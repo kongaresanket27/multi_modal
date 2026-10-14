@@ -84,11 +84,7 @@ export function useAppStore() {
         role: 'assistant',
         content: 'Welcome to **StudyPilot**! Upload a textbook PDF, slide deck, lecture video, or a YouTube lecture with captions to build your own source-cited knowledge base. I will answer from your uploaded material and flag questions the sources do not cover.',
         timestamp: Date.now(),
-        suggested_follow_ups: [
-          'How do I upload course materials?',
-          'How does source-cited tutoring work?',
-          'How can I start a diagnostic assessment?',
-        ],
+        suggested_follow_ups: [],
       },
     ];
   });
