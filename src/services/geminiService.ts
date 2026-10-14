@@ -162,37 +162,7 @@ export const BENCHMARK_EVALUATION_METRICS: EvaluationMetric[] = [
 
 // Simulated Multi-Session Student Cohorts
 export const SIMULATED_STUDENT_PROFILES: SimulatedStudentProfile[] = [
-  {
-    id: 'sim-1',
-    name: 'Priya Sharma',
-    archetype: 'Struggling Beginner',
-    initial_mastery: 0.22,
-    final_mastery: 0.76,
-    gain_percentage: 245,
-    sessions_simulated: 10,
-    questions_attempted: 64,
-    repetition_rate: 0.0,
-  },
-  {
-    id: 'sim-2',
-    name: 'Marcus Vance',
-    archetype: 'Visual Thinker',
-    initial_mastery: 0.41,
-    final_mastery: 0.88,
-    gain_percentage: 114,
-    sessions_simulated: 10,
-    questions_attempted: 58,
-    repetition_rate: 0.0,
-  },
-  {
-    id: 'sim-3',
-    name: 'Elena Rostova',
-    archetype: 'Advanced Fast-Pacer',
-    initial_mastery: 0.62,
-    final_mastery: 0.96,
-    gain_percentage: 54,
-    sessions_simulated: 10,
-    questions_attempted: 50,
-    repetition_rate: 0.0,
-  },
+  { id: 'sim-1', name: 'Synthetic Beginner', archetype: 'Struggling Beginner', initial_mastery: 0.22, final_mastery: 0.22, gain_percentage: 0, sessions_simulated: 0, questions_attempted: 0, repetition_rate: 0 },
+  { id: 'sim-2', name: 'Synthetic Visual Learner', archetype: 'Visual Thinker', initial_mastery: 0.41, final_mastery: 0.41, gain_percentage: 0, sessions_simulated: 0, questions_attempted: 0, repetition_rate: 0 },
+  { id: 'sim-3', name: 'Synthetic Advanced Learner', archetype: 'Advanced Fast-Pacer', initial_mastery: 0.62, final_mastery: 0.62, gain_percentage: 0, sessions_simulated: 0, questions_attempted: 0, repetition_rate: 0 },
 ];
