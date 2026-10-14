@@ -5,7 +5,7 @@
  * with robust error-handling, fallback reasoning, and schema parsing.
  */
 
-import { Citation, Question, QuizSubmission, EvaluationMetric, SimulatedStudentProfile } from '../types';
+import { Citation, Question, QuizSubmission, EvaluationMetric, SimulatedStudentProfile, ContentUnit } from '../types';
 import { SAMPLE_QUESTIONS_POOL } from '../demo-data/sampleCourse';
 
 export interface ChatResponsePayload {
@@ -107,7 +107,8 @@ export async function generateAdaptiveQuestions(
   topicIds: string[],
   count: number,
   difficulty: 'easy' | 'medium' | 'hard' | 'adaptive',
-  pastQuestionIds: Set<string>
+  pastQuestionIds: Set<string>,
+  sourceUnits: ContentUnit[] = []
 ): Promise<Question[]> {
   try {
     const res = await fetch('/api/generate-quiz', {
@@ -118,6 +119,7 @@ export async function generateAdaptiveQuestions(
         count,
         difficulty,
         pastQuestionIds: Array.from(pastQuestionIds),
+        sourceUnits: sourceUnits.filter(unit => topicIds.includes(unit.topic_id)).map(unit => ({ id: unit.id, title: unit.title, summary: unit.summary, excerpt: unit.full_text_excerpt, topic_id: unit.topic_id, topic_name: unit.topic_name, source_file: unit.source_file, source_location: unit.source_location, source_type: unit.source_type, concept_tags: unit.concept_tags })),
       }),
     });
     if (res.ok) {
@@ -125,12 +127,15 @@ export async function generateAdaptiveQuestions(
       if (Array.isArray(data.questions) && data.questions.length > 0) {
         return data.questions;
       }
+      throw new Error(data.error || 'No verified questions could be generated from the selected source material.');
     }
   } catch (err) {
-    console.warn('Backend quiz generation unavailable, using verified pool:', err);
+    console.error('Grounded quiz generation failed:', err);
+    throw err instanceof Error ? err : new Error('Grounded quiz generation failed.');
   }
 
-  // Filter pool matching selected topics & unattempted
+  /* Demo fallback intentionally disabled: quiz questions must be generated from the active course sources. */
+  /* Filter pool matching selected topics & unattempted
   let available = SAMPLE_QUESTIONS_POOL.filter(q => {
     const matchesTopic = topicIds.length === 0 || topicIds.includes(q.topic_id);
     return matchesTopic && !pastQuestionIds.has(q.id);
@@ -146,7 +151,7 @@ export async function generateAdaptiveQuestions(
     available = [...SAMPLE_QUESTIONS_POOL];
   }
 
-  return available.slice(0, count);
+  return available.slice(0, count); */
 }
 
 export async function gradeOpenEndedAnswer(
