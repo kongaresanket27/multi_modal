@@ -176,6 +176,7 @@ export default function App() {
                   store={store}
                   onStartQuiz={handleStartQuiz}
                   initialTopicId={preselectedQuizTopicId}
+                  onNavigateToIngestion={() => setActiveTab('ingestion')}
                 />
               )}
             </>
