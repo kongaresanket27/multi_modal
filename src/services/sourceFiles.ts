@@ -14,3 +14,9 @@ export function registerSourceFile(file: File): void {
 export function getSourceFileUrl(fileName: string): string | undefined {
   return sourceUrls.get(fileName);
 }
+
+export function unregisterSourceFile(fileName: string): void {
+  const url = sourceUrls.get(fileName);
+  if (url) URL.revokeObjectURL(url);
+  sourceUrls.delete(fileName);
+}
