@@ -40,6 +40,7 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
   const [selectedTypes, setSelectedTypes] = useState<QuestionType[]>(['mcq', 'numerical']);
   const [isTimedExam, setIsTimedExam] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [generationError, setGenerationError] = useState<string>('');
 
   // Past answered question IDs for 0% repeat guarantee
   const pastAnsweredQuestionIds = new Set<string>();
@@ -63,6 +64,7 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
 
   const handleGenerate = async () => {
     setIsGenerating(true);
+    setGenerationError('');
     try {
       const targetTopicIds = selectedTopicIds.length > 0
         ? selectedTopicIds
@@ -85,6 +87,7 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
       onStartQuiz(questions, title, isTimedExam);
     } catch (err) {
       console.error('Quiz builder error:', err);
+      setGenerationError(err instanceof Error ? err.message : 'Quiz generation failed. Please try again.');
     } finally {
       setIsGenerating(false);
     }
@@ -110,6 +113,8 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
           Generate custom quizzes and timed mock exams with automatic verification, zero-repeat anti-duplication, and cited feedback.
         </p>
       </div>
+
+      {generationError && <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300">{generationError}</div>}
 
       {/* Main Settings Card */}
       <div className="p-6 md:p-8 rounded-2xl bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
