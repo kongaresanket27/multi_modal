@@ -22,7 +22,7 @@ const toBase64 = (file: File) => new Promise<string>((resolve, reject) => {
 });
 
 export const IngestionPage: React.FC<IngestionPageProps> = ({ store, onExploreKnowledgeBase }) => {
-  const { addIngestedContent } = store;
+  const { addIngestedContent, course } = store;
   const [sources, setSources] = useState<QueuedSource[]>([]);
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
