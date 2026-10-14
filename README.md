@@ -127,7 +127,7 @@ python -m pip install -r evaluation/requirements.txt
 python evaluation/run_ragas.py
 ```
 
-The RAGAS runner records faithfulness, answer relevancy, context precision, and context recall for the included labeled fixture. Results are written to ignored local JSON files under `evaluation/`. The app dashboard deliberately continues to show “Not measured” until a benchmark result is explicitly imported/recorded; running a script does not automatically prove performance on a user's own course material. For submission, run the same evaluation with a larger labeled test set derived from the actual course sources and preserve the generated result files as evidence.
+The RAGAS runner records faithfulness, answer relevancy, context precision, and context recall for the included labeled fixture. Results are written to ignored local JSON files under `evaluation/`. The app dashboard deliberately continues to show “Not measured” until a benchmark result is explicitly imported/recorded; running a script does not automatically prove performance on a user's own course material. For submission, run the same evaluation with a larger labeled test set derived from the actual course sources and preserve the generated result files as evidence. The repository also includes a manual GitHub Actions workflow named **RAGAS Evaluation**. Configure a repository secret named `GEMINI_API_KEY`, open Actions → RAGAS Evaluation → Run workflow, and download the `studypilot-ragas-evaluation` artifact. This workflow is optional and does not run automatically on every commit.
 
 ## Hackathon submission checklist
 
