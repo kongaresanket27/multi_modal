@@ -36,7 +36,7 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
   const [isFigureExpanded, setIsFigureExpanded] = useState(false);
   if (!isOpen || !citation) return null;
   const sourceUrl = getSourceFileUrl(citation.source_file);
-  const pageNumber = citation.source_location.match(/page\\s*(\\d+)/i)?.[1] || '1';
+  const pageNumber = citation.source_location.match(/page\s*(\d+)/i)?.[1] || '1';
 
   const handleCopyCitation = () => {
     const text = `[Source Citation] ${citation.source_title} - ${citation.source_file} (${citation.source_location})\nExcerpt: "${citation.excerpt}"`;
