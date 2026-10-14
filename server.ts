@@ -182,8 +182,8 @@ app.post('/api/generate-quiz', async (req, res) => {
         if (independentAnswer.length < 2) continue;
         const generatedAnswer = String(candidate.correct_answer).trim();
         if (candidate.type === 'numerical') {
-          const generatedNumber = generatedAnswer.replace(/,/g, '').match(/-?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?/i)?.[0];
-          const solvedNumber = independentAnswer.replace(/,/g, '').match(/-?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?/i)?.[0];
+          const generatedNumber = generatedAnswer.replace(/,/g, '').match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/i)?.[0];
+          const solvedNumber = independentAnswer.replace(/,/g, '').match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/i)?.[0];
           if (generatedNumber && solvedNumber) {
             const a = Number(generatedNumber), b = Number(solvedNumber);
             if (!Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a - b) > Math.max(0.01, Math.abs(a) * 0.02)) continue;
@@ -195,8 +195,8 @@ app.post('/api/generate-quiz', async (req, res) => {
           const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
           const expected = normalize(generatedAnswer);
           const solved = normalize(independentAnswer);
-          const expectedTokens = new Set(expected.split(/\\s+/).filter(Boolean));
-          const solvedTokens = new Set(solved.split(/\\s+/).filter(Boolean));
+          const expectedTokens = new Set(expected.split(/\s+/).filter(Boolean));
+          const solvedTokens = new Set(solved.split(/\s+/).filter(Boolean));
           const overlap = [...expectedTokens].filter(token => solvedTokens.has(token)).length / Math.max(1, Math.min(expectedTokens.size, solvedTokens.size));
           if (expected !== solved && !expected.includes(solved) && !solved.includes(expected) && overlap < 0.6) continue;
         }
