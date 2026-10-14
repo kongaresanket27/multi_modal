@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Question, QuizSubmission, Citation } from '../types';
+import { gradeOpenEndedAnswer } from '../services/geminiService';
 import { useAppStore } from '../store/useStore';
 
 interface QuizPlayerPageProps {
@@ -43,6 +44,7 @@ export const QuizPlayerPage: React.FC<QuizPlayerPageProps> = ({
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [typedAnswer, setTypedAnswer] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isGrading, setIsGrading] = useState(false);
   const [timeLeftSeconds, setTimeLeftSeconds] = useState(isTimed ? 600 : 0);
   const [startTime] = useState(Date.now());
 
@@ -52,6 +54,7 @@ export const QuizPlayerPage: React.FC<QuizPlayerPageProps> = ({
     topic_id: string;
     user_answer: string;
     is_correct: boolean;
+    partial_score?: number;
     feedback: string;
     identified_misconception?: string;
   }[]>([]);
@@ -74,39 +77,54 @@ export const QuizPlayerPage: React.FC<QuizPlayerPageProps> = ({
     return () => clearInterval(interval);
   }, [isTimed]);
 
-  const handleSubmitAnswer = (forceTimeUp: boolean = false) => {
-    if (isSubmitted) return;
+  const handleSubmitAnswer = async (forceTimeUp: boolean = false) => {
+    if (isSubmitted || isGrading) return;
 
     const answer = currentQ.type === 'mcq' ? selectedOption : typedAnswer;
     if (answer === null && !forceTimeUp) return;
 
     let isCorrect = false;
+    let partialScore = 0;
+    let feedback = '';
     let identifiedMisconception: string | undefined;
 
     if (currentQ.type === 'mcq') {
       isCorrect = answer === currentQ.correct_answer;
+      partialScore = isCorrect ? 1 : 0;
       if (!isCorrect && currentQ.misconceptions) {
         const found = currentQ.misconceptions.find(m => m.option_index.toString() === answer);
-        if (found) {
-          identifiedMisconception = found.misconception_label;
-        }
+        if (found) identifiedMisconception = found.misconception_label;
+      }
+      feedback = isCorrect
+        ? 'Correct. ' + currentQ.worked_solution
+        : 'Incorrect. Expected ' + (currentQ.options?.[Number(currentQ.correct_answer)] || currentQ.correct_answer) + '. ' + currentQ.worked_solution;
+    } else if (!forceTimeUp && String(answer || '').trim()) {
+      setIsGrading(true);
+      try {
+        const grade = await gradeOpenEndedAnswer(currentQ, String(answer));
+        partialScore = Math.max(0, Math.min(1, Number(grade.partialScore) || 0));
+        isCorrect = grade.isCorrect === true && partialScore >= 0.7;
+        feedback = grade.feedback || (isCorrect ? 'Your answer is supported by the source.' : 'Your answer needs revision. Review the cited solution.');
+      } catch {
+        const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9.]+/g, ' ').trim();
+        const cleanUser = normalize(String(answer || ''));
+        const cleanCorrect = normalize(currentQ.correct_answer);
+        isCorrect = Boolean(cleanCorrect) && (cleanUser === cleanCorrect || cleanUser.includes(cleanCorrect));
+        partialScore = isCorrect ? 1 : 0;
+        feedback = isCorrect ? 'Your answer matches the expected answer.' : 'Could not complete AI grading; review the cited source solution.';
+      } finally {
+        setIsGrading(false);
       }
     } else {
-      // Numerical check
-      const cleanUser = (answer || '').trim().toLowerCase();
-      const cleanCorrect = currentQ.correct_answer.trim().toLowerCase();
-      isCorrect = cleanUser === cleanCorrect || cleanUser.includes(cleanCorrect);
+      feedback = 'No answer was submitted before time expired. Review the source-grounded solution below.';
     }
-
-    const feedback = isCorrect
-      ? `Correct! ${currentQ.worked_solution}`
-      : `Incorrect. Expected ${currentQ.type === 'mcq' && currentQ.options ? currentQ.options[parseInt(currentQ.correct_answer, 10)] : currentQ.correct_answer}. ${currentQ.worked_solution}`;
 
     const newRecord = {
       question_id: currentQ.id,
       topic_id: currentQ.topic_id,
-      user_answer: answer || '',
+      user_answer: String(answer || ''),
       is_correct: isCorrect,
+      partial_score: partialScore,
       feedback,
       identified_misconception: identifiedMisconception,
     };
@@ -125,7 +143,8 @@ export const QuizPlayerPage: React.FC<QuizPlayerPageProps> = ({
       // Completed Quiz!
       const totalTimeSpent = Math.round((Date.now() - startTime) / 1000);
       const correctCount = recordedAnswers.filter(a => a.is_correct).length;
-      const scorePct = Math.round((correctCount / questions.length) * 100);
+      const earnedPoints = recordedAnswers.reduce((sum, answer) => sum + (answer.partial_score ?? (answer.is_correct ? 1 : 0)), 0);
+      const scorePct = Math.round((earnedPoints / questions.length) * 100);
 
       // Trigger Confetti if high score!
       if (scorePct >= 75) {
@@ -356,8 +375,14 @@ export const QuizPlayerPage: React.FC<QuizPlayerPageProps> = ({
             </div>
 
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-xs">
-              {currentQ.worked_solution}
+              {recordedAnswers[recordedAnswers.length - 1]?.feedback}
             </p>
+            <p className="text-slate-500 dark:text-slate-400 leading-relaxed text-[11px]">
+              Source-grounded solution: {currentQ.worked_solution}
+            </p>
+            {currentQ.type !== 'mcq' && recordedAnswers[recordedAnswers.length - 1]?.partial_score !== undefined && (
+              <p className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400">Partial credit: {Math.round((recordedAnswers[recordedAnswers.length - 1]?.partial_score || 0) * 100)}%</p>
+            )}
 
             {/* Identified Misconception */}
             {recordedAnswers[recordedAnswers.length - 1]?.identified_misconception && (
@@ -382,10 +407,10 @@ export const QuizPlayerPage: React.FC<QuizPlayerPageProps> = ({
         {!isSubmitted ? (
           <button
             onClick={() => handleSubmitAnswer(false)}
-            disabled={currentQ.type === 'mcq' ? selectedOption === null : !typedAnswer.trim()}
+            disabled={isGrading || (currentQ.type === 'mcq' ? selectedOption === null : !typedAnswer.trim())}
             className="px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed shadow-md transition-all cursor-pointer flex items-center gap-1.5"
           >
-            <span>Check Answer</span>
+            <span>{isGrading ? 'Grading with course source…' : 'Check Answer'}</span>
             <Send className="w-3.5 h-3.5" />
           </button>
         ) : (
