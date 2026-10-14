@@ -9,10 +9,43 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import JSZip from 'jszip';
+import { inflateRawSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 
 dotenv.config();
+
+function readZipEntries(input: Buffer): Map<string, Buffer> {
+  const entries = new Map<string, Buffer>();
+  const minOffset = Math.max(0, input.length - 65557);
+  let endOffset = -1;
+  for (let i = input.length - 22; i >= minOffset; i--) {
+    if (input.readUInt32LE(i) === 0x06054b50) { endOffset = i; break; }
+  }
+  if (endOffset < 0) throw new Error('Invalid PPTX archive: ZIP directory not found.');
+  const entryCount = input.readUInt16LE(endOffset + 10);
+  let cursor = input.readUInt32LE(endOffset + 16);
+  for (let i = 0; i < entryCount; i++) {
+    if (cursor + 46 > input.length || input.readUInt32LE(cursor) !== 0x02014b50) break;
+    const method = input.readUInt16LE(cursor + 10);
+    const compressedSize = input.readUInt32LE(cursor + 20);
+    const nameLength = input.readUInt16LE(cursor + 28);
+    const extraLength = input.readUInt16LE(cursor + 30);
+    const commentLength = input.readUInt16LE(cursor + 32);
+    const localOffset = input.readUInt32LE(cursor + 42);
+    const name = input.subarray(cursor + 46, cursor + 46 + nameLength).toString('utf8');
+    if (localOffset + 30 <= input.length && input.readUInt32LE(localOffset) === 0x04034b50) {
+      const localNameLength = input.readUInt16LE(localOffset + 26);
+      const localExtraLength = input.readUInt16LE(localOffset + 28);
+      const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+      const compressed = input.subarray(dataOffset, dataOffset + compressedSize);
+      if (method === 0) entries.set(name, Buffer.from(compressed));
+      else if (method === 8) entries.set(name, inflateRawSync(compressed));
+    }
+    cursor += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -239,21 +272,21 @@ app.post('/api/ingest', async (req, res) => {
       if (bytes.length > 18 * 1024 * 1024) return res.status(413).json({ error: name + ' exceeds the 18 MB per-file inline ingestion limit. Compress or split it.' });
 
       if (mimeType.includes('presentation') || name.toLowerCase().endsWith('.pptx')) {
-        const zip = await JSZip.loadAsync(bytes);
-        const slidePaths = Object.keys(zip.files).filter(p => /^ppt\/slides\/slide\d+\.xml$/.test(p))
+        const zipEntries = readZipEntries(bytes);
+        const slidePaths = [...zipEntries.keys()].filter(p => /^ppt\/slides\/slide\d+\.xml$/.test(p))
           .sort((a, b) => Number(a.match(/slide(\d+)/)?.[1]) - Number(b.match(/slide(\d+)/)?.[1]));
         const slideTexts: string[] = [];
         for (const p of slidePaths) {
-          const xml = await zip.files[p].async('text');
+          const xml = await Promise.resolve(zipEntries.get(p)?.toString('utf8') || '');
           const text = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(m => m[1]
             .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")).join(' ');
           if (text.trim()) slideTexts.push('Slide ' + p.match(/slide(\d+)/)?.[1] + ': ' + text);
         }
         parts.push({ text: 'PowerPoint source "' + name + '". Extracted slide text:\n' + slideTexts.join('\n') });
         // Also send embedded slide images so visual diagrams can be interpreted, not just slide text.
-        const mediaPaths = Object.keys(zip.files).filter(p => /^ppt\/media\/.+\.(png|jpe?g|webp)$/i.test(p)).slice(0, 8);
+        const mediaPaths = [...zipEntries.keys()].filter(p => /^ppt\/media\/.+\.(png|jpe?g|webp)$/i.test(p)).slice(0, 8);
         for (const mediaPath of mediaPaths) {
-          const mediaBytes = await zip.files[mediaPath].async('nodebuffer');
+          const mediaBytes = await Promise.resolve(zipEntries.get(mediaPath) || Buffer.alloc(0));
           if (mediaBytes.length > 0 && mediaBytes.length <= 4 * 1024 * 1024) {
             const extension = mediaPath.split('.').pop()?.toLowerCase();
             const imageMime = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : extension === 'webp' ? 'image/webp' : 'image/png';
