@@ -5,7 +5,7 @@
  * with robust error-handling, fallback reasoning, and schema parsing.
  */
 
-import { Citation, Question, QuizSubmission, EvaluationMetric, SimulatedStudentProfile, ContentUnit } from '../types';
+import { Citation, Question, QuizSubmission, EvaluationMetric, SimulatedStudentProfile, ContentUnit, QuestionType } from '../types';
 
 export interface ChatResponsePayload {
   answer: string;
