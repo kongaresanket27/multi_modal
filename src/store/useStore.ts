@@ -259,6 +259,31 @@ export function useAppStore() {
       for (const topic of newTopics) {
         if (!existingTopicIds.has(topic.id)) mergedTopics.push(topic);
       }
+      const mergedPrerequisites = [...prev.prerequisites];
+      const edgeKey = (from: string, to: string) => from + '->' + to;
+      const existingEdges = new Set(mergedPrerequisites.map(edge => edgeKey(edge.fromTopicId, edge.toTopicId)));
+      const hasPath = (start: string, target: string): boolean => {
+        const visited = new Set<string>();
+        const stack = [start];
+        while (stack.length) {
+          const current = stack.pop()!;
+          if (current === target) return true;
+          if (visited.has(current)) continue;
+          visited.add(current);
+          for (const edge of mergedPrerequisites) if (edge.fromTopicId === current) stack.push(edge.toTopicId);
+        }
+        return false;
+      };
+      for (const topic of newTopics) {
+        for (const prerequisiteId of topic.prerequisite_ids || []) {
+          const key = edgeKey(prerequisiteId, topic.id);
+          if (prerequisiteId === topic.id || !mergedTopics.some(item => item.id === prerequisiteId) || existingEdges.has(key)) continue;
+          // Preserve a DAG even if the model proposes cyclic prerequisite links.
+          if (hasPath(topic.id, prerequisiteId)) continue;
+          mergedPrerequisites.push({ fromTopicId: prerequisiteId, toTopicId: topic.id, relationship: 'builds_upon', concept: topic.title });
+          existingEdges.add(key);
+        }
+      }
       const existingUnitIds = new Set(prev.content_units.map(unit => unit.id));
       const mergedUnits = [...prev.content_units];
       for (const unit of newUnits) {
@@ -271,6 +296,7 @@ export function useAppStore() {
         institution: isFirstIngestion ? 'Your uploaded sources' : prev.institution,
         description: isFirstIngestion ? 'Knowledge base built from your uploaded course sources.' : prev.description,
         topics: mergedTopics,
+        prerequisites: mergedPrerequisites,
         content_units: mergedUnits,
       };
     });
