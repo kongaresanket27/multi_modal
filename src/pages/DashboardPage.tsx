@@ -19,13 +19,13 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useAppStore } from '../store/useStore';
-import { SAMPLE_MASTERY_HISTORY } from '../demo-data/sampleCourse';
 
 interface DashboardPageProps {
   store: ReturnType<typeof useAppStore>;
   onNavigateToQuiz: (topicId?: string) => void;
   onNavigateToTutor: (initialQuery?: string) => void;
   onNavigateToCourseMap: () => void;
+  onNavigateToIngestion: () => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
@@ -33,12 +33,47 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   onNavigateToQuiz,
   onNavigateToTutor,
   onNavigateToCourseMap,
+  onNavigateToIngestion,
 }) => {
   const { course, topicMastery, learnerProfile, quizHistory } = store;
 
+  if (course.content_units.length === 0) {
+    return (
+      <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-8">
+        <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 md:p-12 text-center space-y-5">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center">
+            <BrainCircuit className="w-8 h-8 text-indigo-600 dark:text-indigo-400" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white">Build your study space</h1>
+            <p className="max-w-2xl mx-auto text-sm text-slate-600 dark:text-slate-400">
+              Start with your own course materials. StudyPilot will extract topics and concepts, keep source locations, answer from retrieved excerpts, and create assessments from your uploaded content.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-left">
+            {[
+              { title: '1. Add materials', description: 'Upload PDFs, PPTX slides, images, text, or a lecture video/YouTube link.' },
+              { title: '2. Learn with citations', description: 'Ask questions and open the source page, slide, or timestamp where available.' },
+              { title: '3. Practice and adapt', description: 'Generate quizzes and update topic mastery as you answer.' },
+            ].map(step => (
+              <div key={step.title} className="rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-4">
+                <h2 className="text-xs font-bold text-slate-900 dark:text-white">{step.title}</h2>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">{step.description}</p>
+              </div>
+            ))}
+          </div>
+          <button onClick={onNavigateToIngestion} className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors">
+            <ArrowRight className="w-4 h-4" /> Upload course materials
+          </button>
+          <p className="text-[11px] text-slate-500">No demo citations or learner progress are preloaded. Your dashboard fills as you ingest sources and complete assessments.</p>
+        </div>
+      </div>
+    );
+  }
+
   // Compute Overall Weighted Mastery
   const totalMastery = topicMastery.reduce((acc, curr) => acc + curr.mastery, 0);
-  const overallMasteryPct = Math.round((totalMastery / topicMastery.length) * 100);
+  const overallMasteryPct = topicMastery.length ? Math.round((totalMastery / topicMastery.length) * 100) : 0;
 
   // Topics needing review or critical
   const weakTopics = topicMastery
@@ -73,7 +108,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             Welcome back, {learnerProfile.student_name}
           </h1>
           <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-            You're <span className="font-semibold text-emerald-600 dark:text-emerald-400">+14% stronger</span> in Computational Graphs this week. Your next priority is Transformer Attention.
+            You have {course.topics.length} topics and {course.content_units.length} source-linked content units. Mastery updates as you practice.
           </p>
         </div>
 
