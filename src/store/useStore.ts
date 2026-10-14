@@ -93,9 +93,9 @@ export function useAppStore() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.THEME);
-      return stored ? stored === 'dark' : true;
+      return stored ? stored === 'dark' : false;
     } catch {
-      return true;
+      return false;
     }
   });
 
