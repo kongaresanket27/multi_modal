@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import JSZip from 'jszip';
 
 dotenv.config();
 
@@ -197,6 +198,111 @@ Grade the student answer on a scale from 0.0 to 1.0 (with partial credit). Retur
   } catch (err: any) {
     console.error('Grading Error:', err);
     res.status(500).json({ error: err.message || 'Error grading answer' });
+  }
+});
+
+
+app.post('/api/ingest', async (req, res) => {
+  try {
+    const body = req.body as { files?: Array<{ name: string; mimeType: string; data: string }>; youtubeUrls?: string[] };
+    const files = body.files || [];
+    const youtubeUrls = body.youtubeUrls || [];
+    if (!ai) return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
+    if (!Array.isArray(files) || !Array.isArray(youtubeUrls) || (!files.length && !youtubeUrls.length)) {
+      return res.status(400).json({ error: 'Add at least one supported file or YouTube URL.' });
+    }
+    if (files.length > 8) return res.status(400).json({ error: 'Upload up to 8 files per batch.' });
+
+    const parts: any[] = [];
+    const sourceNames: string[] = [];
+    for (const file of files) {
+      if (!file?.name || !file?.mimeType || !file?.data) return res.status(400).json({ error: 'A file is missing its name, MIME type, or content.' });
+      const name = String(file.name).slice(0, 200);
+      const mimeType = String(file.mimeType);
+      const bytes = Buffer.from(String(file.data).replace(/^data:[^;]+;base64,/, ''), 'base64');
+      if (!bytes.length) return res.status(400).json({ error: 'Could not read ' + name + '.' });
+      if (bytes.length > 18 * 1024 * 1024) return res.status(413).json({ error: name + ' exceeds the 18 MB per-file inline ingestion limit. Compress or split it.' });
+
+      if (mimeType.includes('presentation') || name.toLowerCase().endsWith('.pptx')) {
+        const zip = await JSZip.loadAsync(bytes);
+        const slidePaths = Object.keys(zip.files).filter(p => /^ppt\/slides\/slide\d+\.xml$/.test(p))
+          .sort((a, b) => Number(a.match(/slide(\d+)/)?.[1]) - Number(b.match(/slide(\d+)/)?.[1]));
+        const slideTexts: string[] = [];
+        for (const p of slidePaths) {
+          const xml = await zip.files[p].async('text');
+          const text = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(m => m[1]
+            .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")).join(' ');
+          if (text.trim()) slideTexts.push('Slide ' + p.match(/slide(\d+)/)?.[1] + ': ' + text);
+        }
+        parts.push({ text: 'PowerPoint source "' + name + '". Extracted slide text:\n' + slideTexts.join('\n') });
+      } else if (mimeType === 'application/pdf' || mimeType.startsWith('image/') || mimeType.startsWith('video/')) {
+        if (mimeType.startsWith('video/') && bytes.length > 18 * 1024 * 1024) return res.status(413).json({ error: 'Video is too large for inline processing: ' + name });
+        parts.push({ text: 'Analyze source file "' + name + '". Only report page, figure, slide, or timestamp locations supported by the supplied content.' });
+        parts.push({ inlineData: { mimeType, data: bytes.toString('base64') } });
+      } else if (mimeType.startsWith('text/')) {
+        parts.push({ text: 'Source file "' + name + '":\n' + bytes.toString('utf8').slice(0, 120000) });
+      } else {
+        return res.status(415).json({ error: 'Unsupported file type: ' + name + '. Use PDF, PPTX, MP4/MOV, PNG/JPG, or text files.' });
+      }
+      sourceNames.push(name);
+    }
+
+    for (const urlValue of youtubeUrls) {
+      const url = String(urlValue).trim();
+      if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(url)) return res.status(400).json({ error: 'Not a valid YouTube URL: ' + url });
+      parts.push({ text: 'YouTube lecture source URL: ' + url + '. If the video or transcript is not available to you, do not invent its content or timestamps; report it as inaccessible in warnings.' });
+      sourceNames.push(url);
+    }
+
+    const systemInstruction = 'You are StudyPilot, a source-faithful course material ingestion engine. Analyze only supplied materials; never invent facts, page numbers, slide numbers, timestamps, or diagrams. Return only valid JSON: {"topics":[{"id":"topic-slug","title":"...","description":"...","subtopics":["..."],"concepts":["..."],"estimated_study_minutes":15,"prerequisite_ids":[]}],"units":[{"id":"unique-id","title":"...","summary":"...","full_text_excerpt":"...","topic_id":"matching topic id","topic_name":"...","subtopic":"...","concept_tags":["..."],"difficulty":"easy|medium|hard","source_type":"pdf|slide|video|youtube","source_file":"exact filename or URL","source_location":"grounded Page N, Slide N, or timestamp","video_timestamp_seconds":0,"youtube_video_id":"if known","is_figure":false,"figure_caption":""}],"warnings":[]} Create up to 12 meaningful units per source and 1-8 topics. Keep each excerpt grounded in the actual material. Do not create units for inaccessible URLs.';
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: [{ role: 'user', parts: [...parts, { text: 'Ingest these sources: ' + sourceNames.join(', ') + '. Return structured, grounded units and topics.' }] }],
+      config: { systemInstruction, responseMimeType: 'application/json', temperature: 0.1 },
+    });
+    const parsed = JSON.parse(response.text || '{}');
+    const topics = Array.isArray(parsed.topics) ? parsed.topics : [];
+    const units = Array.isArray(parsed.units) ? parsed.units : [];
+    const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+    if (!units.length) return res.status(422).json({ error: 'No grounded content units could be extracted from these sources.', warnings });
+
+    const safeTopics = topics.map((t: any, i: number) => ({
+      id: String(t.id || ('ingested-topic-' + Date.now() + '-' + i)),
+      title: String(t.title || 'Untitled topic'),
+      description: String(t.description || ''),
+      subtopics: Array.isArray(t.subtopics) ? t.subtopics.map(String) : [],
+      concepts: Array.isArray(t.concepts) ? t.concepts.map(String) : [],
+      estimated_study_minutes: Number(t.estimated_study_minutes) || 15,
+      prerequisite_ids: Array.isArray(t.prerequisite_ids) ? t.prerequisite_ids.map(String) : [],
+      unit_count: 0,
+    }));
+    const topicNames = new Map(safeTopics.map((t: any) => [t.id, t.title]));
+    const safeUnits = units.map((u: any, i: number) => {
+      const topicId = String(u.topic_id || safeTopics[0]?.id || 'ingested-topic');
+      const unit: any = {
+        id: String(u.id || ('ingested-unit-' + Date.now() + '-' + i)),
+        title: String(u.title || 'Untitled content'),
+        summary: String(u.summary || ''),
+        full_text_excerpt: String(u.full_text_excerpt || ''),
+        topic_id: topicId,
+        topic_name: String(u.topic_name || topicNames.get(topicId) || 'Course material'),
+        subtopic: String(u.subtopic || ''),
+        concept_tags: Array.isArray(u.concept_tags) ? u.concept_tags.map(String) : [],
+        difficulty: ['easy', 'medium', 'hard'].includes(u.difficulty) ? u.difficulty : 'medium',
+        source_type: ['pdf', 'slide', 'video', 'youtube'].includes(u.source_type) ? u.source_type : 'pdf',
+        source_file: String(u.source_file || sourceNames[0] || 'Uploaded material'),
+        source_location: String(u.source_location || 'Location not identified'),
+      };
+      if (Number.isFinite(Number(u.video_timestamp_seconds))) unit.video_timestamp_seconds = Number(u.video_timestamp_seconds);
+      if (u.youtube_video_id) unit.youtube_video_id = String(u.youtube_video_id);
+      if (u.is_figure) { unit.is_figure = true; unit.figure_caption = String(u.figure_caption || ''); }
+      return unit;
+    });
+    for (const topic of safeTopics) topic.unit_count = safeUnits.filter((u: any) => u.topic_id === topic.id).length;
+    return res.json({ topics: safeTopics, units: safeUnits, warnings, sourceCount: sourceNames.length });
+  } catch (err: any) {
+    console.error('Ingestion API Error:', err);
+    return res.status(500).json({ error: err.message || 'Error processing course materials' });
   }
 });
 
