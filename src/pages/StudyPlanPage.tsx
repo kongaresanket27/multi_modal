@@ -46,6 +46,18 @@ export const StudyPlanPage: React.FC<StudyPlanPageProps> = ({
     );
   }, [topicMastery, topicsLookup, course.exam_date, course.target_weekly_hours]);
 
+  if (!course.content_units.length || !course.topics.length) {
+    return (
+      <div className="p-6 md:p-8 max-w-4xl mx-auto">
+        <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center space-y-3">
+          <CalendarIcon className="w-8 h-8 mx-auto text-indigo-500" />
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Personalized Study Planner</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400">Upload your course material and complete an assessment. StudyPilot will then schedule reviews from your topic mastery and review-due estimates.</p>
+        </div>
+      </div>
+    );
+  }
+
   // Exam days countdown
   const examDate = new Date(course.exam_date);
   const daysUntilExam = Math.max(1, Math.ceil((examDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
@@ -90,7 +102,7 @@ export const StudyPlanPage: React.FC<StudyPlanPageProps> = ({
             Adaptive Forgetting Curve Schedule
           </h3>
           <p className="text-xs text-indigo-900/80 dark:text-indigo-300/80 max-w-3xl leading-relaxed">
-            Topics where retrievability $R(t) = \exp(-t/S)$ falls below 85% are automatically scheduled ahead of the exam. Notice that high-priority topics like Attention Mechanisms & Optimization are scheduled early to maximize long-term consolidation.
+            Topics with lower estimated mastery or review retrievability are prioritized using the learner model. The schedule changes as you complete assessments and topic mastery is updated.
           </p>
         </div>
         <div className="font-mono text-xs text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-lg border border-indigo-200 dark:border-indigo-800 shrink-0">
