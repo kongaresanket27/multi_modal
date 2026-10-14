@@ -49,6 +49,7 @@ export const QuizPlayerPage: React.FC<QuizPlayerPageProps> = ({
   // Record student responses
   const [recordedAnswers, setRecordedAnswers] = useState<{
     question_id: string;
+    topic_id: string;
     user_answer: string;
     is_correct: boolean;
     feedback: string;
@@ -103,6 +104,7 @@ export const QuizPlayerPage: React.FC<QuizPlayerPageProps> = ({
 
     const newRecord = {
       question_id: currentQ.id,
+      topic_id: currentQ.topic_id,
       user_answer: answer || '',
       is_correct: isCorrect,
       feedback,
