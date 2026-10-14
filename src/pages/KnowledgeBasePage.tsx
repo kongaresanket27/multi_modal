@@ -20,7 +20,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { useAppStore } from '../store/useStore';
-import { ContentUnit, Citation, SourceType } from '../types';
+import { ContentUnit, Citation } from '../types';
 
 interface KnowledgeBasePageProps {
   store: ReturnType<typeof useAppStore>;
@@ -36,11 +36,7 @@ export const KnowledgeBasePage: React.FC<KnowledgeBasePageProps> = ({
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [selectedSourceType, setSelectedSourceType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({
-    'topic-1': true,
-    'topic-2': true,
-    'topic-5': true,
-  });
+  const [expandedTopics, setExpandedTopics] = useState<Record<string, boolean>>({});
 
   const toggleTopicExpand = (topicId: string) => {
     setExpandedTopics((prev) => ({ ...prev, [topicId]: !prev[topicId] }));
@@ -83,6 +79,19 @@ export const KnowledgeBasePage: React.FC<KnowledgeBasePageProps> = ({
     openCitation(citation);
   };
 
+  if (!course.content_units.length) {
+    return (
+      <div className="p-6 md:p-8 max-w-4xl mx-auto">
+        <div className="p-8 rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-center space-y-3">
+          <BookOpen className="w-8 h-8 mx-auto text-indigo-500" />
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Your knowledge base is empty</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400">Upload course material to extract source-linked topics, excerpts, and citations.</p>
+          <button type="button" onClick={onNavigateToIngestion} className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500">Upload course materials</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6">
       {/* Top Banner & Header */}
@@ -94,7 +103,7 @@ export const KnowledgeBasePage: React.FC<KnowledgeBasePageProps> = ({
             </span>
             <span className="text-xs text-slate-400">·</span>
             <span className="text-xs text-slate-500">
-              {course.content_units.length} verified units across {course.topics.length} topics
+              {course.content_units.length} source-linked units across {course.topics.length} topics
             </span>
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white">
@@ -134,7 +143,9 @@ export const KnowledgeBasePage: React.FC<KnowledgeBasePageProps> = ({
             { id: 'all', label: 'All Units' },
             { id: 'pdf', label: 'PDF Textbooks' },
             { id: 'slide', label: 'Lecture Slides' },
-            { id: 'video', label: 'Video Lectures' },
+            { id: 'video', label: 'Uploaded Videos' },
+            { id: 'youtube', label: 'YouTube' },
+            { id: 'text', label: 'Text / Markdown' },
             { id: 'figure', label: 'Figures & Diagrams' },
           ].map((tab) => (
             <button
@@ -252,7 +263,7 @@ export const KnowledgeBasePage: React.FC<KnowledgeBasePageProps> = ({
             <span>
               Showing {filteredUnits.length} content units {selectedTopicId ? `in selected topic` : ''}
             </span>
-            <span>Click any unit to open verified source excerpt</span>
+            <span>Click any unit to open its retrieved source excerpt</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -264,9 +275,12 @@ export const KnowledgeBasePage: React.FC<KnowledgeBasePageProps> = ({
                     return { label: `Video · ${unit.source_location}`, icon: Video, color: 'text-rose-500 bg-rose-50 dark:bg-rose-950/40 border-rose-200/50 dark:border-rose-900/40' };
                   case 'slide':
                     return { label: `Slide · ${unit.source_location}`, icon: Presentation, color: 'text-amber-500 bg-amber-50 dark:bg-amber-950/40 border-amber-200/50 dark:border-amber-900/40' };
+                  case 'text':
+                    return { label: `Text · ${unit.source_location}`, icon: FileText, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/40 border-teal-200/50 dark:border-teal-900/40' };
                   case 'pdf':
-                  default:
                     return { label: `PDF · ${unit.source_location}`, icon: FileText, color: 'text-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200/50 dark:border-indigo-800/50' };
+                  default:
+                    return { label: `Source · ${unit.source_location}`, icon: FileText, color: 'text-slate-500 bg-slate-50 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800' };
                 }
               };
 
