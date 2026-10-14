@@ -401,7 +401,13 @@ app.post('/api/ingest', async (req, res) => {
         source_location: String(u.source_location || 'Location not identified'),
       };
       if (Number.isFinite(Number(u.video_timestamp_seconds))) unit.video_timestamp_seconds = Number(u.video_timestamp_seconds);
-      if (u.youtube_video_id) unit.youtube_video_id = String(u.youtube_video_id);
+      else {
+        const stamp = unit.source_location.match(/(?:^|\\s)(?:(\\d+):)?(\\d{1,2}):(\\d{2})(?:$|\\s)/);
+        if (stamp) unit.video_timestamp_seconds = (Number(stamp[1] || 0) * 3600) + (Number(stamp[2]) * 60) + Number(stamp[3]);
+      }
+      const sourceVideoId = unit.source_type === 'youtube' ? unit.source_file.match(/(?:v=|youtu\\.be\\/|shorts\\/)([A-Za-z0-9_-]{11})/)?.[1] : undefined;
+      if (sourceVideoId) unit.youtube_video_id = sourceVideoId;
+      else if (u.youtube_video_id) unit.youtube_video_id = String(u.youtube_video_id);
       if (u.is_figure) { unit.is_figure = true; unit.figure_caption = String(u.figure_caption || ''); }
       return unit;
     });
