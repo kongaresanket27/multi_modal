@@ -63,14 +63,14 @@ export const EvaluationBenchPage: React.FC = () => {
             </span>
             <span className="text-xs text-slate-400">·</span>
             <span className="text-xs text-slate-500">
-              RAGAS Framework & Empirical Cohort Simulation
+              RAGAS-style metrics & synthetic cohort simulation
             </span>
           </div>
           <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white">
             System Evaluation Benchmark
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Empirical validation of source grounding, retrieval precision, hallucination refusal, and adaptive student mastery gains.
+            Benchmark metrics are not yet measured; the cohort control runs a reproducible synthetic BKT simulation.
           </p>
         </div>
 
@@ -127,7 +127,7 @@ export const EvaluationBenchPage: React.FC = () => {
                 {/* Progress bar */}
                 <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div
-                    className="bg-emerald-500 h-full rounded-full transition-all duration-700"
+                    className={metric.sample_size > 0 ? 'bg-emerald-500 h-full rounded-full transition-all duration-700' : 'bg-slate-300 dark:bg-slate-700 h-full rounded-full'}
                     style={{ width: `${scorePct}%` }}
                   />
                 </div>
@@ -158,7 +158,7 @@ export const EvaluationBenchPage: React.FC = () => {
             </p>
           </div>
           <span className="text-xs font-mono font-bold text-indigo-500">
-            0.0% Repetition Rate
+            {simProfiles.every(profile => profile.sessions_simulated === 0) ? 'Simulation not run yet' : 'Synthetic repetition rate: 0.0%'}
           </span>
         </div>
 
