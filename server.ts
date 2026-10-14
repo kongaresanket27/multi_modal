@@ -302,7 +302,7 @@ app.post('/api/ingest', async (req, res) => {
       }
       if (!transcriptAdded) ingestionWarnings.push('Could not retrieve an available English caption track for ' + url + '. No transcript-based content was generated for this link; upload a transcript or video file to ingest it.');
       sourceNames.push(url);
-      sourceTypes.set(url, 'youtube');
+      if (transcriptAdded) sourceTypes.set(url, 'youtube');
     }
 
     const systemInstruction = 'You are StudyPilot, a source-faithful course material ingestion engine. Analyze only supplied materials; never invent facts, page numbers, slide numbers, timestamps, or diagrams. Return only valid JSON: {"topics":[{"id":"topic-slug","title":"...","description":"...","subtopics":["..."],"concepts":["..."],"estimated_study_minutes":15,"prerequisite_ids":[]}],"units":[{"id":"unique-id","title":"...","summary":"...","full_text_excerpt":"...","topic_id":"matching topic id","topic_name":"...","subtopic":"...","concept_tags":["..."],"difficulty":"easy|medium|hard","source_type":"pdf|slide|video|youtube","source_file":"exact filename or URL","source_location":"grounded Page N, Slide N, or timestamp","video_timestamp_seconds":0,"youtube_video_id":"if known","is_figure":false,"figure_caption":""}],"warnings":[]} Create up to 12 meaningful units per source and 1-8 topics. Keep each excerpt grounded in the actual material. Do not create units for inaccessible URLs.';
@@ -328,7 +328,7 @@ app.post('/api/ingest', async (req, res) => {
       unit_count: 0,
     }));
     const topicNames = new Map(safeTopics.map((t: any) => [t.id, t.title]));
-    const safeUnits = units.map((u: any, i: number) => {
+    const safeUnits = units.filter((u: any) => sourceTypes.has(String(u.source_file || ''))).map((u: any, i: number) => {
       const topicId = String(u.topic_id || safeTopics[0]?.id || 'ingested-topic');
       const unit: any = {
         id: String(u.id || ('ingested-unit-' + Date.now() + '-' + i)),
@@ -340,8 +340,8 @@ app.post('/api/ingest', async (req, res) => {
         subtopic: String(u.subtopic || ''),
         concept_tags: Array.isArray(u.concept_tags) ? u.concept_tags.map(String) : [],
         difficulty: ['easy', 'medium', 'hard'].includes(u.difficulty) ? u.difficulty : 'medium',
-        source_type: sourceTypes.get(String(u.source_file || '')) || (['pdf', 'slide', 'video', 'youtube'].includes(u.source_type) ? u.source_type : 'pdf'),
-        source_file: sourceNames.includes(String(u.source_file || '')) ? String(u.source_file) : String(sourceNames.find(source => source === String(u.source_file || '')) || sourceNames[0] || 'Uploaded material'),
+        source_type: sourceTypes.get(String(u.source_file || '')) || 'pdf',
+        source_file: String(u.source_file),
         source_location: String(u.source_location || 'Location not identified'),
       };
       if (Number.isFinite(Number(u.video_timestamp_seconds))) unit.video_timestamp_seconds = Number(u.video_timestamp_seconds);
@@ -349,6 +349,7 @@ app.post('/api/ingest', async (req, res) => {
       if (u.is_figure) { unit.is_figure = true; unit.figure_caption = String(u.figure_caption || ''); }
       return unit;
     });
+    if (!safeUnits.length) return res.status(422).json({ error: 'The model did not return units tied to a readable supplied source. No unsupported units were added.', warnings });
     for (const topic of safeTopics) topic.unit_count = safeUnits.filter((u: any) => u.topic_id === topic.id).length;
     return res.json({ topics: safeTopics, units: safeUnits, warnings, sourceCount: sourceNames.length });
   } catch (err: any) {
