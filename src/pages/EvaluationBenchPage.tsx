@@ -19,6 +19,7 @@ import {
   Info,
 } from 'lucide-react';
 import { BENCHMARK_EVALUATION_METRICS, SIMULATED_STUDENT_PROFILES } from '../services/geminiService';
+import { updateBKT } from '../learner/bkt';
 
 export const EvaluationBenchPage: React.FC = () => {
   const [isRunningSim, setIsRunningSim] = useState(false);
@@ -26,17 +27,29 @@ export const EvaluationBenchPage: React.FC = () => {
 
   const handleRerunSimulation = () => {
     setIsRunningSim(true);
+    // Reproducible synthetic BKT run: 10 sessions × 6 unique questions per profile.
     setTimeout(() => {
-      setSimProfiles(prev =>
-        prev.map(p => ({
-          ...p,
-          sessions_simulated: p.sessions_simulated + 2,
-          questions_attempted: p.questions_attempted + 12,
-          final_mastery: Math.min(0.98, p.final_mastery + 0.02),
-        }))
-      );
+      setSimProfiles(prev => prev.map((profile, profileIndex) => {
+        let mastery = profile.initial_mastery;
+        const correctThreshold = [4, 7, 9][profileIndex] || 6;
+        for (let session = 0; session < 10; session++) {
+          for (let question = 0; question < 6; question++) {
+            const isCorrect = ((session * 3 + question * 2 + profileIndex) % 10) < correctThreshold;
+            mastery = updateBKT(mastery, isCorrect).newMastery;
+          }
+        }
+        const gain = ((mastery - profile.initial_mastery) / Math.max(profile.initial_mastery, 0.01)) * 100;
+        return {
+          ...profile,
+          final_mastery: mastery,
+          gain_percentage: Number(gain.toFixed(1)),
+          sessions_simulated: profile.sessions_simulated + 10,
+          questions_attempted: profile.questions_attempted + 60,
+          repetition_rate: 0,
+        };
+      }));
       setIsRunningSim(false);
-    }, 1500);
+    }, 250);
   };
 
   return (
@@ -76,10 +89,10 @@ export const EvaluationBenchPage: React.FC = () => {
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            RAGAS Pipeline Evaluation Metrics (Test Set: N=150 items)
+            RAGAS Pipeline Evaluation Metrics (no labeled test run recorded)
           </h3>
           <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-            All metrics exceed target thresholds
+            Benchmark scores not yet measured
           </span>
         </div>
 
@@ -98,13 +111,13 @@ export const EvaluationBenchPage: React.FC = () => {
                     {metric.metric_name}
                   </span>
                   <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950 px-2 py-0.5 rounded border border-emerald-200/50 dark:border-emerald-900/50">
-                    Exceeds Target
+                    {metric.sample_size > 0 ? (metric.score >= metric.benchmark_target ? 'Meets Target' : 'Below Target') : 'Not Measured'}
                   </span>
                 </div>
 
                 <div className="flex items-baseline gap-2">
                   <span className="text-3xl font-black text-slate-900 dark:text-white font-mono tabular-nums">
-                    {scorePct}%
+                    {metric.sample_size > 0 ? scorePct + '%' : 'Not measured'}
                   </span>
                   <span className="text-xs text-slate-400">
                     target: &ge;{targetPct}%
@@ -124,7 +137,7 @@ export const EvaluationBenchPage: React.FC = () => {
                 </p>
 
                 <p className="text-[10px] text-slate-400 font-mono border-t border-slate-100 dark:border-slate-800 pt-2">
-                  Method: {metric.methodology}
+                  Samples: {metric.sample_size || 'none'} · Method: {metric.methodology}
                 </p>
               </div>
             );
@@ -141,7 +154,7 @@ export const EvaluationBenchPage: React.FC = () => {
               Simulated Multi-Session Student Cohorts (BKT Personalization)
             </h3>
             <p className="text-xs text-slate-500">
-              Evaluated across 10 consecutive adaptive study sessions, logging mastery gains and question repetition rate.
+              Synthetic BKT simulation only. Click re-run to compute reproducible outcomes; these are not real-user study results.
             </p>
           </div>
           <span className="text-xs font-mono font-bold text-indigo-500">
