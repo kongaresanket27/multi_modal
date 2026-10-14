@@ -245,9 +245,10 @@ app.post('/api/grade-answer', async (req, res) => {
 
     const prompt = `Question: "${question.question}"
 Correct Answer / Worked Solution: "${question.worked_solution}"
+Course source: ${question.source_file || 'Unknown source'} (${question.source_location || 'Unknown location'})
 Student Answer: "${userAnswer}"
 
-Grade the student answer on a scale from 0.0 to 1.0 (with partial credit). Return JSON:
+Grade the student answer on a scale from 0.0 to 1.0 (with partial credit). Use only the provided worked solution. Include a source-location citation in feedback, and do not add unsupported facts. Return JSON:
 {
   "isCorrect": boolean,
   "partialScore": number,
