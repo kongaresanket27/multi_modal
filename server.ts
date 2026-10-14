@@ -51,56 +51,48 @@ app.get('/api/health', (req, res) => {
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, citations, mode, language, learnerMasteryLevel } = req.body;
+    if (!message || typeof message !== 'string') return res.status(400).json({ error: 'A question is required.' });
+    const safeCitations = Array.isArray(citations) ? citations.filter((c: any) => c && typeof c.excerpt === 'string' && c.excerpt.trim()) : [];
 
-    if (!ai) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
+    // A missing retrieval result is not permission to answer from general model knowledge.
+    if (!safeCitations.length) {
+      return res.json({
+        answer: 'I could not find a sufficiently relevant excerpt in the current course materials to answer this reliably. Try a more specific question or upload the relevant lecture, slide, or textbook page.',
+        citations: [],
+        isOutsideMaterial: true,
+        outsideKnowledgeContent: '',
+        suggestedFollowUps: ['Browse the knowledge base', 'Upload a relevant course source', 'Ask about a topic listed in your course'],
+        learnerAdaptationNote: 'No sufficiently relevant source was retrieved; source-grounded refusal applied.',
+      });
     }
+    if (!ai) return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
 
-    const citationsText = (citations || [])
-      .map((c: any, i: number) => `[Source ${i + 1}] (${c.source_file}, ${c.source_location})\nTitle: ${c.source_title}\nExcerpt: "${c.excerpt}"`)
-      .join('\n\n');
-
-    let modePrompt = 'Provide an authoritative, source-grounded academic explanation with step-by-step logic.';
-    if (mode === 'eli5') modePrompt = 'Explain in simple everyday intuitive terms without heavy jargon.';
-    if (mode === 'step_by_step') modePrompt = 'Explain in numbered sequential logical steps.';
-    if (mode === 'socratic') modePrompt = 'Ask guiding questions to help the student derive the answer from the excerpts.';
-
-    let langPrompt = '';
-    if (language === 'hi') langPrompt = 'Respond in formal Hindi (Devanagari script) with technical English terms preserved.';
-    if (language === 'hinglish') langPrompt = 'Respond in natural conversational Hinglish (Hindi in Latin script with English academic terms).';
-
-    const systemInstruction = `You are StudyPilot, an elite university tutor.
-CRITICAL GROUNDING RULES:
-1. Base your answer EXCLUSIVELY on the provided course sources below.
-2. Every claim must have an inline bracket citation like [1] or [2] matching the source index.
-3. If the sources do NOT contain enough information to answer, state clearly that it is not covered in the course syllabus.
-4. Adapt to the student's mastery level: ${learnerMasteryLevel}.
-5. Style: ${modePrompt}
-${langPrompt}`;
-
-    const prompt = `Course Sources:\n${citationsText}\n\nStudent Question: "${message}"`;
-
+    const citationsText = safeCitations.map((c: any, i: number) =>
+      '[Source ' + (i + 1) + '] (' + String(c.source_file || 'Unknown file') + ', ' + String(c.source_location || 'Unknown location') + ')\nTitle: ' + String(c.source_title || '') + '\nExcerpt: "' + String(c.excerpt).slice(0, 12000) + '"'
+    ).join('\n\n');
+    let modePrompt = 'Explain clearly using only the supplied excerpts.';
+    if (mode === 'eli5') modePrompt = 'Explain in simple everyday language, using only the supplied excerpts.';
+    if (mode === 'step_by_step') modePrompt = 'Explain in numbered steps. Every step must be supported by the supplied excerpts.';
+    if (mode === 'socratic') modePrompt = 'Ask a guiding question grounded in the supplied excerpts; do not add unsupported facts.';
+    if (mode === 'quiz_me') modePrompt = 'Briefly summarize the supplied excerpts and ask one check question, without revealing unsupported information.';
+    const langPrompt = language === 'hi'
+      ? 'Respond in Hindi (Devanagari), preserving technical English terms.'
+      : language === 'hinglish' ? 'Respond in conversational Hinglish.' : 'Respond in English.';
+    const systemInstruction = 'You are StudyPilot, a source-grounded academic tutor. Answer ONLY from the course excerpts provided. Do not use outside knowledge to fill gaps. If the excerpts do not support the requested answer, explicitly say the course materials do not establish it and do not guess. Cite each factual claim with [1], [2] matching the source list. Never claim a source supports something not present in its excerpt. Student mastery level: ' + String(learnerMasteryLevel || 'unknown') + '. Style: ' + modePrompt + ' ' + langPrompt;
     const response = await ai.models.generateContent({
       model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        systemInstruction,
-        temperature: 0.2, // low temperature for high grounding fidelity
-      },
+      contents: 'Course Sources:\n' + citationsText + '\n\nStudent Question: ' + message,
+      config: { systemInstruction, temperature: 0.1 },
     });
-
-    const answerText = response.text || '';
-
+    const answerText = response.text || 'The supplied excerpts do not contain enough information to answer that reliably.';
+    const insufficient = /not (?:covered|included|established|specified|supported)|do not contain enough|does not (?:cover|establish|support)|cannot determine from (?:the )?(?:provided|supplied) (?:sources|excerpts)/i.test(answerText);
     res.json({
       answer: answerText,
-      citations: citations || [],
-      isOutsideMaterial: false,
-      suggestedFollowUps: [
-        'How does this connect to previous topics?',
-        'Can you show a mathematical edge case?',
-        'Quiz me on this concept',
-      ],
-      learnerAdaptationNote: `Adapted for ${learnerMasteryLevel} mastery.`,
+      citations: safeCitations,
+      isOutsideMaterial: insufficient,
+      outsideKnowledgeContent: '',
+      suggestedFollowUps: ['How does this connect to a prerequisite topic?', 'Quiz me on this concept', 'Show the exact source excerpt'],
+      learnerAdaptationNote: 'Explanation tailored to ' + String(learnerMasteryLevel || 'your') + ' mastery level and constrained to retrieved excerpts.',
     });
   } catch (err: any) {
     console.error('Chat API Error:', err);
