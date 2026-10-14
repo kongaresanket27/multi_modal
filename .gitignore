@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Generated evaluation output (recreated by benchmark commands)
+evaluation/retrieval-benchmark-results.json
+evaluation/ragas-input.json
+evaluation/ragas-results.json
