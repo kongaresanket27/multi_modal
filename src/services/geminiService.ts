@@ -61,44 +61,28 @@ export async function askGroundedTutor(
     console.warn('Backend /api/chat unavailable, using high-fidelity local grounded engine:', err);
   }
 
-  // High-fidelity local grounded engine
-  const primaryCitation = citations[0];
-  const secondaryCitation = citations[1];
-
-  let answerText = '';
-  const adaptation = learnerMasteryLevel === 'critical'
-    ? 'Adapting to your level: Foundational breakdown with step-by-step intuition.'
-    : learnerMasteryLevel === 'needs_review'
-    ? 'Adapting to your level: Intermediate synthesis with prerequisite checks.'
-    : 'Adapting to your level: Advanced mathematical and geometric formulation.';
-
-  if (language === 'hi') {
-    answerText = `आपके पाठ्यक्रम के अनुसार, **${primaryCitation.source_title}** [1] में यह स्पष्ट रूप से बताया गया है:\n\n${primaryCitation.excerpt} [1]\n\n${secondaryCitation ? `इसके अतिरिक्त, **${secondaryCitation.source_file}** [2] में यह पुष्टि की गई है कि यह सिद्धांत प्रत्यक्ष रूप से लागू होता है।` : ''}`;
-  } else if (language === 'hinglish') {
-    answerText = `Course material ke mutabik, **${primaryCitation.source_title}** [1] me yeh clearly explained hai:\n\n"${primaryCitation.excerpt}" [1]\n\n${secondaryCitation ? `Aur **${secondaryCitation.source_file}** (${secondaryCitation.source_location}) [2] me bhi iska deeper mathematical intuition provide kiya gaya hai.` : ''}\n\nYeh concept aapke exam aur assignments ke liye crucial hai.`;
-  } else {
-    // English
-    if (mode === 'eli5') {
-      answerText = `Think of it like this: according to **${primaryCitation.source_file}** (${primaryCitation.source_location}) [1], the core idea is:\n\n> "${primaryCitation.excerpt}" [1]\n\nIn simple everyday terms: rather than getting stuck trying to compute things from scratch, the system uses this structured mechanism to keep everything balanced and fast. ${secondaryCitation ? `As noted in **${secondaryCitation.source_file}** [2], this avoids bottlenecks and keeps learning stable.` : ''}`;
-    } else if (mode === 'step_by_step') {
-      answerText = `Here is the step-by-step derivation directly grounded in your course materials:\n\n1. **Fundamental Principle** [1]: "${primaryCitation.excerpt}" (${primaryCitation.source_file}, ${primaryCitation.source_location}).\n2. **Mathematical Interaction** [1]: The parameters interact through vector-matrix transformations that preserve stability and gradient flow.\n3. **Practical Application** ${secondaryCitation ? `[2]: As described in ${secondaryCitation.source_file} (${secondaryCitation.source_location}), this directly resolves optimization challenges.` : '[1]: This guarantees stable convergence.'}`;
-    } else if (mode === 'socratic') {
-      answerText = `Let's break this down together based on your course readings in **${primaryCitation.source_file}** [1].\n\nNotice how the text states: "${primaryCitation.excerpt}" [1].\n\n**Guiding Question for You:** If the dimensionality of the key vectors were to double, what would happen to the variance of the dot products before the softmax step? How would that affect the gradient?`;
-    } else {
-      answerText = `Based on your course materials in **${primaryCitation.source_file}** (${primaryCitation.source_location}) [1]:\n\n${primaryCitation.excerpt} [1]\n\n${secondaryCitation ? `Furthermore, in **${secondaryCitation.source_file}** (${secondaryCitation.source_location}) [2]:\n\n${secondaryCitation.excerpt} [2]` : ''}\n\nThis formulation is central to understanding how gradients propagate effectively through the architecture without numerical instability.`;
-    }
+  // Safe offline fallback: quote only retrieved excerpts instead of generating unsupported claims.
+  const availableCitations = citations.filter(citation => citation.excerpt && citation.excerpt.trim());
+  if (!availableCitations.length) {
+    return {
+      answer: "I couldn't find a sufficiently relevant excerpt in the uploaded course materials to answer this reliably. Please upload the relevant page, slide, or lecture.",
+      citations: [],
+      isOutsideMaterial: true,
+      outsideKnowledgeContent: '',
+      suggestedFollowUps: ['Browse the knowledge base', 'Upload a relevant course source'],
+      learnerAdaptationNote: 'Source-grounded refusal applied because no excerpt was available.',
+    };
   }
-
+  const quotedSources = availableCitations.slice(0, 3).map((citation, index) =>
+    '[' + (index + 1) + '] ' + citation.source_title + ' (' + citation.source_file + ', ' + citation.source_location + ')\n> ' + citation.excerpt
+  ).join('\n\n');
   return {
-    answer: answerText,
-    citations,
+    answer: 'The AI explanation service is currently unavailable, so I will not add an unverified explanation. Here are the relevant excerpts retrieved from your course material:\n\n' + quotedSources,
+    citations: availableCitations,
     isOutsideMaterial: false,
-    suggestedFollowUps: [
-      `What are the prerequisite assumptions in ${primaryCitation.source_title}?`,
-      `Show me a numerical calculation from this section`,
-      `How does this concept appear on final exams?`,
-    ],
-    learnerAdaptationNote: adaptation,
+    outsideKnowledgeContent: '',
+    suggestedFollowUps: ['Try the explanation again when the AI service is available', 'Ask a more specific question about this excerpt'],
+    learnerAdaptationNote: 'Offline fallback displays retrieved source excerpts only; no generated claims were added.',
   };
 }
 
