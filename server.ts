@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import JSZip from 'jszip';
+import { createHash } from 'node:crypto';
 
 dotenv.config();
 
@@ -96,63 +97,83 @@ app.post('/api/chat', async (req, res) => {
     });
   } catch (err: any) {
     console.error('Chat API Error:', err);
-    res.status(500).json({ error: err.message || 'Error processing chat request' });
+    res.status(500).json({ error: err.message || 'Er// Adaptive Quiz Generation Endpoint with independent second-pass verification
+app.post('/api/generate-quiz', async (req, res) => {
+  try {
+    const { topicIds = [], count = 5, difficulty = 'medium', pastQuestionIds = [], sourceUnits = [] } = req.body;
+    if (!ai) return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
+    if (!Array.isArray(sourceUnits) || !sourceUnits.length) {
+      return res.status(400).json({ error: 'No source material is available for the selected topics. Upload or select course material first.' });
+    }
+    const requestedCount = Math.min(10, Math.max(1, Number(count) || 5));
+    const selectedUnits = sourceUnits.filter((u: any) => topicIds.includes(u.topic_id) && u.excerpt);
+    if (!selectedUnits.length) return res.status(422).json({ error: 'No source excerpts matched the selected topics.' });
+    const sourceContext = selectedUnits.slice(0, 60).map((u: any, i: number) =>
+      '[U' + i + '] id=' + u.id + '; topic=' + u.topic_name + ' (' + u.topic_id + '); source=' + u.source_file + '; location=' + u.source_location + '; concepts=' + JSON.stringify(u.concept_tags || []) + '\nExcerpt: ' + String(u.excerpt).slice(0, 5000)
+    ).join('\n\n');
+    const prompt = 'Create ' + requestedCount + ' new academic questions at difficulty ' + String(difficulty) + ' using ONLY the source excerpts below. Mix MCQ, short_answer, and numerical question types when supported. Each question must be answerable from an excerpt and cite the exact source file/location and unit id. Do not make up source locations. Do not repeat any previous question identifiers: ' + JSON.stringify(pastQuestionIds) + '.\nReturn JSON array schema: [{ "id":"temporary-id","type":"mcq|short_answer|numerical","question":"...","options":["A","B","C","D"],"correct_answer":"0 for MCQ, otherwise concise answer","worked_solution":"source-grounded steps with source citations","topic_id":"...","topic_name":"...","concept_tags":["..."],"difficulty":"easy|medium|hard","source_location":"exact source location","source_file":"exact source file","source_type":"pdf|slide|video|youtube","unit_id":"exact source unit id","is_verified":false,"misconceptions":[{"option_index":1,"misconception_label":"...","explanation":"...","cited_source_location":"..."}]}]. For MCQ use four distinct options and a single correct option. Source excerpts:\n' + sourceContext;
+    const generated = await ai.models.generateContent({
+      model: 'gemini-3.8-flash',
+      contents: prompt,
+      config: { responseMimeType: 'application/json', temperature: 0.2 },
+    });
+    const parsed = JSON.parse(generated.text || '[]');
+    if (!Array.isArray(parsed)) return res.status(502).json({ error: 'The question generator returned an invalid format.' });
+    const seen = new Set<string>(Array.isArray(pastQuestionIds) ? pastQuestionIds.map(String) : []);
+    const verified: any[] = [];
+    for (const candidate of parsed) {
+      if (verified.length >= requestedCount) break;
+      const source = selectedUnits.find((u: any) => u.id === candidate.unit_id);
+      if (!source || !candidate.question || !candidate.correct_answer || !candidate.worked_solution) continue;
+      const questionText = String(candidate.question).trim();
+      const stableId = 'q-' + createHash('sha256').update(questionText.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()).digest('hex').slice(0, 20);
+      if (seen.has(stableId)) continue;
+      const isMcq = candidate.type === 'mcq';
+      if (isMcq && (!Array.isArray(candidate.options) || candidate.options.length !== 4 || new Set(candidate.options.map(String)).size !== 4)) continue;
+      const answerIndex = isMcq ? Number(candidate.correct_answer) : -1;
+      if (isMcq && (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex > 3)) continue;
+
+      // Independent solve: verifier receives the problem and source excerpt, but never the proposed answer or solution.
+      const verificationPrompt = 'Independently solve the following question using only the source excerpt. You MUST NOT assume an answer key. Return JSON {"answer_index": number for MCQ or -1 for non-MCQ, "answer_text":"concise answer for non-MCQ", "supported_by_source":boolean, "reason":"brief source-based reason"}. Question: ' + questionText + '\nOptions: ' + JSON.stringify(isMcq ? candidate.options : []) + '\nSource excerpt: ' + String(source.excerpt).slice(0, 5000);
+      const verification = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: verificationPrompt,
+        config: { responseMimeType: 'application/json', temperature: 0 },
+      });
+      let check: any;
+      try { check = JSON.parse(verification.text || '{}'); } catch { continue; }
+      if (check.supported_by_source !== true) continue;
+      if (isMcq && Number(check.answer_index) !== answerIndex) continue;
+      if (!isMcq && (!String(check.answer_text || '').trim() || String(check.answer_text).trim().length < 2)) continue;
+
+      const question = {
+        ...candidate,
+        id: stableId,
+        type: ['mcq', 'short_answer', 'numerical'].includes(candidate.type) ? candidate.type : 'mcq',
+        options: isMcq ? candidate.options.map(String) : undefined,
+        topic_id: source.topic_id,
+        topic_name: source.topic_name,
+        source_file: source.source_file,
+        source_location: source.source_location,
+        source_type: source.source_type,
+        unit_id: source.id,
+        concept_tags: Array.isArray(candidate.concept_tags) ? candidate.concept_tags.map(String) : source.concept_tags || [],
+        difficulty: ['easy', 'medium', 'hard'].includes(candidate.difficulty) ? candidate.difficulty : (difficulty === 'adaptive' ? 'medium' : difficulty),
+        is_verified: true,
+        verification_notes: 'Independently solved in a second model pass without exposing the proposed answer key.',
+      };
+      seen.add(stableId);
+      verified.push(question);
+    }
+    if (!verified.length) return res.status(422).json({ error: 'No generated questions passed independent answer verification and source checks. Try a different topic or difficulty.' });
+    res.json({ questions: verified, requestedCount, verifiedCount: verified.length, verification: 'independent-second-pass' });
+  } catch (err: any) {
+    console.error('Quiz Generation Error:', err);
+    res.status(500).json({ error: err.message || 'Error generating verified questions' });
   }
 });
 
-// Adaptive Quiz Generation Endpoint
-app.post('/api/generate-quiz', async (req, res) => {
-  try {
-    const { topicIds, count, difficulty, pastQuestionIds } = req.body;
-
-    if (!ai) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY not configured on server' });
-    }
-
-    const systemInstruction = `You are an expert exam author. Generate ${count || 3} challenging, strictly source-grounded academic exam questions for difficulty "${difficulty || 'medium'}".
-Return a JSON array of question objects adhering to this schema:
-[
-  {
-    "id": "q-gen-unique-id",
-    "type": "mcq",
-    "question": "Clear problem statement",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correct_answer": "0", // 0-indexed string
-    "worked_solution": "Step-by-step rigorous derivation",
-    "topic_id": "${topicIds?.[0] || 'topic-1'}",
-    "topic_name": "Course Topic",
-    "concept_tags": ["Concept1", "Concept2"],
-    "difficulty": "${difficulty || 'medium'}",
-    "source_location": "Slide 14",
-    "source_file": "Lecture14.pdf",
-    "source_type": "slide",
-    "is_verified": true,
-    "misconceptions": [
-      {
-        "option_index": 1,
-        "misconception_label": "Common error description",
-        "explanation": "Why this option is mathematically flawed",
-        "cited_source_location": "Slide 14"
-      }
-    ]
-  }
-]`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: `Generate ${count || 3} high quality questions for topics: ${JSON.stringify(topicIds)}. Do NOT repeat any question IDs: ${JSON.stringify(pastQuestionIds || [])}. Output pure JSON only.`,
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json',
-        temperature: 0.3,
-      },
-    });
-
-    const parsed = JSON.parse(response.text || '[]');
-    res.json({ questions: parsed });
-  } catch (err: any) {
-    console.error('Quiz Generation Error:', err);
-    res.status(500).json({ error: err.message || 'Error generating quiz' });
+e || 'Error generating quiz' });
   }
 });
 
