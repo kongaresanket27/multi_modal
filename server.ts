@@ -228,6 +228,8 @@ app.post('/api/ingest', async (req, res) => {
 
     const parts: any[] = [];
     const sourceNames: string[] = [];
+    const sourceTypes = new Map<string, string>();
+    const ingestionWarnings: string[] = [];
     for (const file of files) {
       if (!file?.name || !file?.mimeType || !file?.data) return res.status(400).json({ error: 'A file is missing its name, MIME type, or content.' });
       const name = String(file.name).slice(0, 200);
@@ -248,6 +250,17 @@ app.post('/api/ingest', async (req, res) => {
           if (text.trim()) slideTexts.push('Slide ' + p.match(/slide(\d+)/)?.[1] + ': ' + text);
         }
         parts.push({ text: 'PowerPoint source "' + name + '". Extracted slide text:\n' + slideTexts.join('\n') });
+        // Also send embedded slide images so visual diagrams can be interpreted, not just slide text.
+        const mediaPaths = Object.keys(zip.files).filter(p => /^ppt\/media\/.+\.(png|jpe?g|webp)$/i.test(p)).slice(0, 8);
+        for (const mediaPath of mediaPaths) {
+          const mediaBytes = await zip.files[mediaPath].async('nodebuffer');
+          if (mediaBytes.length > 0 && mediaBytes.length <= 4 * 1024 * 1024) {
+            const extension = mediaPath.split('.').pop()?.toLowerCase();
+            const imageMime = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : extension === 'webp' ? 'image/webp' : 'image/png';
+            parts.push({ text: 'Embedded figure from presentation "' + name + '" (' + mediaPath + '). Describe only what is visibly present; associate it with the nearest slide if the relationship is clear.' });
+            parts.push({ inlineData: { mimeType: imageMime, data: mediaBytes.toString('base64') } });
+          }
+        }
       } else if (mimeType === 'application/pdf' || mimeType.startsWith('image/') || mimeType.startsWith('video/')) {
         if (mimeType.startsWith('video/') && bytes.length > 18 * 1024 * 1024) return res.status(413).json({ error: 'Video is too large for inline processing: ' + name });
         parts.push({ text: 'Analyze source file "' + name + '". Only report page, figure, slide, or timestamp locations supported by the supplied content.' });
@@ -258,13 +271,38 @@ app.post('/api/ingest', async (req, res) => {
         return res.status(415).json({ error: 'Unsupported file type: ' + name + '. Use PDF, PPTX, MP4/MOV, PNG/JPG, or text files.' });
       }
       sourceNames.push(name);
+      sourceTypes.set(name, name.toLowerCase().endsWith('.pptx') ? 'slide' : mimeType === 'application/pdf' ? 'pdf' : mimeType.startsWith('image/') ? 'slide' : mimeType.startsWith('video/') ? 'video' : 'pdf');
     }
 
     for (const urlValue of youtubeUrls) {
       const url = String(urlValue).trim();
       if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(url)) return res.status(400).json({ error: 'Not a valid YouTube URL: ' + url });
-      parts.push({ text: 'YouTube lecture source URL: ' + url + '. If the video or transcript is not available to you, do not invent its content or timestamps; report it as inaccessible in warnings.' });
+      const videoId = url.match(/(?:v=|youtu\.be\/|shorts\/)([A-Za-z0-9_-]{11})/)?.[1];
+      let transcriptAdded = false;
+      if (videoId) {
+        try {
+          const transcriptResponse = await fetch('https://www.youtube.com/api/timedtext?lang=en&v=' + videoId);
+          if (transcriptResponse.ok) {
+            const xml = await transcriptResponse.text();
+            const entries = [...xml.matchAll(/<text[^>]*start="([0-9.]+)"[^>]*>([\s\S]*?)<\/text>/g)];
+            const transcript = entries.map(match => {
+              const seconds = Number(match[1]);
+              const stamp = Math.floor(seconds / 60) + ':' + String(Math.floor(seconds % 60)).padStart(2, '0');
+              const text = match[2].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+              return '[' + stamp + '] ' + text;
+            }).join('\n');
+            if (transcript.trim()) {
+              parts.push({ text: 'Actual English caption transcript for YouTube video ' + url + '. Timestamps come from the caption track.\n' + transcript.slice(0, 100000) });
+              transcriptAdded = true;
+            }
+          }
+        } catch (transcriptError) {
+          console.warn('YouTube caption retrieval failed for', url, transcriptError);
+        }
+      }
+      if (!transcriptAdded) ingestionWarnings.push('Could not retrieve an available English caption track for ' + url + '. No transcript-based content was generated for this link; upload a transcript or video file to ingest it.');
       sourceNames.push(url);
+      sourceTypes.set(url, 'youtube');
     }
 
     const systemInstruction = 'You are StudyPilot, a source-faithful course material ingestion engine. Analyze only supplied materials; never invent facts, page numbers, slide numbers, timestamps, or diagrams. Return only valid JSON: {"topics":[{"id":"topic-slug","title":"...","description":"...","subtopics":["..."],"concepts":["..."],"estimated_study_minutes":15,"prerequisite_ids":[]}],"units":[{"id":"unique-id","title":"...","summary":"...","full_text_excerpt":"...","topic_id":"matching topic id","topic_name":"...","subtopic":"...","concept_tags":["..."],"difficulty":"easy|medium|hard","source_type":"pdf|slide|video|youtube","source_file":"exact filename or URL","source_location":"grounded Page N, Slide N, or timestamp","video_timestamp_seconds":0,"youtube_video_id":"if known","is_figure":false,"figure_caption":""}],"warnings":[]} Create up to 12 meaningful units per source and 1-8 topics. Keep each excerpt grounded in the actual material. Do not create units for inaccessible URLs.';
@@ -276,7 +314,7 @@ app.post('/api/ingest', async (req, res) => {
     const parsed = JSON.parse(response.text || '{}');
     const topics = Array.isArray(parsed.topics) ? parsed.topics : [];
     const units = Array.isArray(parsed.units) ? parsed.units : [];
-    const warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+    const warnings = [...ingestionWarnings, ...(Array.isArray(parsed.warnings) ? parsed.warnings.map(String) : [])];
     if (!units.length) return res.status(422).json({ error: 'No grounded content units could be extracted from these sources.', warnings });
 
     const safeTopics = topics.map((t: any, i: number) => ({
@@ -302,8 +340,8 @@ app.post('/api/ingest', async (req, res) => {
         subtopic: String(u.subtopic || ''),
         concept_tags: Array.isArray(u.concept_tags) ? u.concept_tags.map(String) : [],
         difficulty: ['easy', 'medium', 'hard'].includes(u.difficulty) ? u.difficulty : 'medium',
-        source_type: ['pdf', 'slide', 'video', 'youtube'].includes(u.source_type) ? u.source_type : 'pdf',
-        source_file: String(u.source_file || sourceNames[0] || 'Uploaded material'),
+        source_type: sourceTypes.get(String(u.source_file || '')) || (['pdf', 'slide', 'video', 'youtube'].includes(u.source_type) ? u.source_type : 'pdf'),
+        source_file: sourceNames.includes(String(u.source_file || '')) ? String(u.source_file) : String(sourceNames.find(source => source === String(u.source_file || '')) || sourceNames[0] || 'Uploaded material'),
         source_location: String(u.source_location || 'Location not identified'),
       };
       if (Number.isFinite(Number(u.video_timestamp_seconds))) unit.video_timestamp_seconds = Number(u.video_timestamp_seconds);
