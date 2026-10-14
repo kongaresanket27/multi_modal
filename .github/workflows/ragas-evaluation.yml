@@ -1,0 +1,62 @@
+name: RAGAS Evaluation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ragas:
+    runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PORT: 3000
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate API secret
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "Configure the GEMINI_API_KEY repository secret before running this workflow."
+            exit 1
+          fi
+      - name: Install application dependencies
+        run: npm install --no-audit --no-fund
+      - name: Install RAGAS dependencies
+        run: python -m pip install -r evaluation/requirements.txt
+      - name: Start StudyPilot API
+        run: |
+          npm run dev > /tmp/studypilot.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:3000/api/health > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/studypilot.log
+          exit 1
+      - name: Run deterministic retrieval and refusal benchmark
+        run: npm run evaluate:retrieval
+      - name: Collect source-grounded tutor answers
+        run: npm run evaluate:ragas:collect
+      - name: Score with RAGAS
+        run: python evaluation/run_ragas.py
+      - name: Upload evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studypilot-ragas-evaluation
+          path: |
+            evaluation/ragas-input.json
+            evaluation/ragas-results.json
+            evaluation/retrieval-benchmark-results.json
+          if-no-files-found: ignore
