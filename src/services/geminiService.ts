@@ -5,7 +5,7 @@
  * with robust error-handling, fallback reasoning, and schema parsing.
  */
 
-import { Citation, Question, QuizSubmission, EvaluationMetric, SimulatedStudentProfile, ContentUnit, QuestionType } from '../types';
+import { Citation, Question, QuizSubmission, EvaluationMetric, SimulatedStudentProfile, ContentUnit, QuestionType, TopicMasteryState } from '../types';
 
 export interface ChatResponsePayload {
   answer: string;
@@ -92,7 +92,8 @@ export async function generateAdaptiveQuestions(
   difficulty: 'easy' | 'medium' | 'hard' | 'adaptive',
   pastQuestionIds: Set<string>,
   sourceUnits: ContentUnit[] = [],
-  questionTypes: QuestionType[] = ['mcq', 'short_answer', 'numerical']
+  questionTypes: QuestionType[] = ['mcq', 'short_answer', 'numerical'],
+  topicMastery: TopicMasteryState[] = []
 ): Promise<Question[]> {
   const relevantUnits = sourceUnits.filter(unit => topicIds.includes(unit.topic_id));
   if (!relevantUnits.length) throw new Error('No course excerpts are available for the selected topics. Upload course material first.');
@@ -104,6 +105,7 @@ export async function generateAdaptiveQuestions(
       count,
       difficulty,
       questionTypes,
+      topicMastery: topicMastery.filter(state => topicIds.includes(state.topic_id)).map(state => ({ topic_id: state.topic_id, mastery: state.mastery })),
       pastQuestionIds: Array.from(pastQuestionIds),
       sourceUnits: relevantUnits.map(unit => ({
         id: unit.id, title: unit.title, summary: unit.summary,
