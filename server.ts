@@ -312,25 +312,37 @@ app.post('/api/ingest', async (req, res) => {
         const zipEntries = readZipEntries(bytes);
         const slidePaths = [...zipEntries.keys()].filter(p => /^ppt\/slides\/slide\d+\.xml$/.test(p))
           .sort((a, b) => Number(a.match(/slide(\d+)/)?.[1]) - Number(b.match(/slide(\d+)/)?.[1]));
-        const slideTexts: string[] = [];
-        for (const p of slidePaths) {
-          const xml = await Promise.resolve(zipEntries.get(p)?.toString('utf8') || '');
-          const text = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(m => m[1]
+        const slideNumbers = new Set<number>();
+        for (const slidePath of slidePaths) {
+          const slideNumber = Number(slidePath.match(/slide(\d+)/)?.[1] || 0);
+          if (slideNumber > 0) slideNumbers.add(slideNumber);
+          const xml = zipEntries.get(slidePath)?.toString('utf8') || '';
+          const slideText = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(match => match[1]
             .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")).join(' ');
-          if (text.trim()) slideTexts.push('Slide ' + p.match(/slide(\d+)/)?.[1] + ': ' + text);
-        }
-        parts.push({ text: 'PowerPoint source "' + name + '". Extracted slide text:\n' + slideTexts.join('\n') });
-        // Also send embedded slide images so visual diagrams can be interpreted, not just slide text.
-        const mediaPaths = [...zipEntries.keys()].filter(p => /^ppt\/media\/.+\.(png|jpe?g|webp)$/i.test(p)).slice(0, 8);
-        for (const mediaPath of mediaPaths) {
-          const mediaBytes = await Promise.resolve(zipEntries.get(mediaPath) || Buffer.alloc(0));
-          if (mediaBytes.length > 0 && mediaBytes.length <= 4 * 1024 * 1024) {
+          if (slideText.trim()) parts.push({ text: 'PowerPoint source "' + name + '", Slide ' + slideNumber + ' extracted text:\n' + slideText });
+          // Follow each slide's own relationship file so figures are not assigned to the wrong slide.
+          const relationshipPath = 'ppt/slides/_rels/' + slidePath.split('/').pop() + '.rels';
+          const relationshipXml = zipEntries.get(relationshipPath)?.toString('utf8') || '';
+          const relationships = new Map<string, string>();
+          for (const match of relationshipXml.matchAll(/<Relationship\b(?=[^>]*\bId="([^"]+)")(?=[^>]*\bTarget="([^"]+)")[^>]*\/?\s*>/g)) {
+            const target = match[2];
+            if (/\.(png|jpe?g|webp)$/i.test(target)) {
+              const mediaPath = target.startsWith('/') ? target.slice(1) : path.posix.normalize(path.posix.join('ppt/slides', target));
+              relationships.set(match[1], mediaPath);
+            }
+          }
+          const embeddedIds = [...xml.matchAll(/<a:blip\b[^>]*\br:embed="([^"]+)"/g)].map(match => match[1]);
+          for (const relationshipId of embeddedIds) {
+            const mediaPath = relationships.get(relationshipId);
+            const mediaBytes = mediaPath ? zipEntries.get(mediaPath) : undefined;
+            if (!mediaPath || !mediaBytes || mediaBytes.length === 0 || mediaBytes.length > 4 * 1024 * 1024) continue;
             const extension = mediaPath.split('.').pop()?.toLowerCase();
             const imageMime = extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : extension === 'webp' ? 'image/webp' : 'image/png';
-            parts.push({ text: 'Embedded figure from presentation "' + name + '" (' + mediaPath + '). Describe only what is visibly present; associate it with the nearest slide if the relationship is clear.' });
+            parts.push({ text: 'Embedded visual from "' + name + '", Slide ' + slideNumber + '. Describe only the visible image/diagram and ground any explanation in this slide.' });
             parts.push({ inlineData: { mimeType: imageMime, data: mediaBytes.toString('base64') } });
           }
         }
+        if (!slidePaths.length) ingestionWarnings.push('No slide XML files were found in ' + name + '.');
       } else if (mimeType === 'application/pdf' || mimeType.startsWith('image/') || mimeType.startsWith('video/')) {
         if (mimeType.startsWith('video/') && bytes.length > 18 * 1024 * 1024) return res.status(413).json({ error: 'Video is too large for inline processing: ' + name });
         parts.push({ text: 'Analyze source file "' + name + '". Only report page, figure, slide, or timestamp locations supported by the supplied content.' });
