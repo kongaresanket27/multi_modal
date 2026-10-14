@@ -75,7 +75,8 @@ export const QuizBuilderPage: React.FC<QuizBuilderPageProps> = ({
         questionCount,
         difficulty,
         pastAnsweredQuestionIds,
-        course.content_units
+        course.content_units,
+        selectedTypes
       );
 
       const title = selectedTopicIds.length === 1
