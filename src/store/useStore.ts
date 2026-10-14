@@ -83,12 +83,11 @@ export function useAppStore() {
         id: 'msg-welcome',
         role: 'assistant',
         content: 'Welcome to **StudyPilot**! Upload a textbook PDF, slide deck, lecture video, or a YouTube lecture with captions to build your own source-cited knowledge base. I will answer from your uploaded material and flag questions the sources do not cover.',
-        timestamp: Date.now() - 3600000,
+        timestamp: Date.now(),
         suggested_follow_ups: [
-          'Why does attention divide by sqrt(d_k)?',
-          'How does Momentum prevent oscillations in ravines?',
-          'Explain the double descent phenomenon in deep networks',
-          'What is the receptive field formula for 2D convolutions?',
+          'How do I upload course materials?',
+          'How does source-cited tutoring work?',
+          'How can I start a diagnostic assessment?',
         ],
       },
     ];
