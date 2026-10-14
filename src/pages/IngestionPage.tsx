@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { UploadCloud, FileText, Video, Youtube, CheckCircle2, Sparkles, ArrowRight, Loader2, X, AlertCircle } from 'lucide-react';
 import { useAppStore } from '../store/useStore';
 import { ContentUnit, Topic } from '../types';
+import { registerSourceFile } from '../services/sourceFiles';
 
 interface IngestionPageProps {
   store: ReturnType<typeof useAppStore>;
@@ -36,6 +37,7 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({ store, onExploreKn
     const accepted = picked.filter(file => /\.(pdf|pptx|mp4|mov|png|jpe?g|txt|md)$/i.test(file.name));
     if (accepted.length !== picked.length) setError('Some files were skipped. Supported: PDF, PPTX, MP4/MOV, PNG/JPG, TXT, and MD.');
     if (accepted.length) {
+      accepted.forEach(registerSourceFile);
       setSources(prev => [...prev, ...accepted.map(file => ({ id: crypto.randomUUID(), kind: 'file' as const, file }))]);
       setIsCompleted(false);
     }
