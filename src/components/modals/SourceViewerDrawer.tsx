@@ -5,7 +5,7 @@
  * Highlights exact excerpt, displays diagram figures, and provides simulated video timestamp player.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import {
   X,
   FileText,
@@ -34,16 +34,6 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const [isFigureExpanded, setIsFigureExpanded] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    if (videoRef.current && citation?.video_timestamp_seconds !== undefined) {
-      const seek = () => { if (videoRef.current) videoRef.current.currentTime = citation.video_timestamp_seconds || 0; };
-      videoRef.current.addEventListener('loadedmetadata', seek, { once: true });
-      return () => videoRef.current?.removeEventListener('loadedmetadata', seek);
-    }
-  }, [citation]);
-
   if (!isOpen || !citation) return null;
   const sourceUrl = getSourceFileUrl(citation.source_file);
   const pageNumber = citation.source_location.match(/page\\s*(\\d+)/i)?.[1] || '1';
@@ -153,7 +143,7 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
           )}
           {citation.source_type === 'video' && sourceUrl && (
             <div className="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950">
-              <video ref={videoRef} src={sourceUrl} controls className="w-full aspect-video" />
+              <video src={sourceUrl} controls onLoadedMetadata={event => { event.currentTarget.currentTime = citation.video_timestamp_seconds || 0; }} className="w-full aspect-video" />
               <p className="px-3 py-2 text-[11px] text-slate-400">Original uploaded video · seek target {citation.source_location}</p>
             </div>
           )}
