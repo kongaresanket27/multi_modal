@@ -116,10 +116,10 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
               <iframe title={citation.source_title + ' page ' + pageNumber} src={sourceUrl + '#page=' + pageNumber} className="w-full h-[420px]" />
             </div>
           )}
-          {citation.source_type === 'slide' && sourceUrl && /\\.(png|jpe?g|webp)$/i.test(citation.source_file) && (
+          {citation.source_type === 'slide' && sourceUrl && /\.(png|jpe?g|webp)$/i.test(citation.source_file) && (
             <img src={sourceUrl} alt={citation.source_title} className="w-full rounded-xl border border-slate-200 dark:border-slate-800 object-contain max-h-[420px]" />
           )}
-          {citation.source_type === 'slide' && sourceUrl && /\\.pptx$/i.test(citation.source_file) && (
+          {citation.source_type === 'slide' && sourceUrl && /\.pptx$/i.test(citation.source_file) && (
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
               Original presentation is available in this browser session. The browser cannot preview PPTX directly; use the slide number and extracted excerpt below.
             </div>
