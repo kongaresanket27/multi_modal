@@ -15,21 +15,16 @@ import {
   Citation,
   LanguageMode,
 } from '../types';
-import {
-  SAMPLE_COURSE,
-  INITIAL_TOPIC_MASTERY_STATES,
-  INITIAL_LEARNER_PROFILE,
-  SAMPLE_PAST_QUIZZES,
-} from '../demo-data/sampleCourse';
+import { INITIAL_COURSE, INITIAL_TOPIC_MASTERY_STATES, INITIAL_LEARNER_PROFILE } from '../data/initialState';
 import { updateBKT, applyConversationalNudge, getMasteryStatus } from '../learner/bkt';
 import { updateStabilityAfterReview, calculateRetrievability, calculateReviewDueTimestamp } from '../learner/spacedRepetition';
 
 const STORAGE_KEYS = {
-  ACTIVE_COURSE: 'studypilot_active_course_v1',
-  TOPIC_MASTERY: 'studypilot_topic_mastery_v1',
-  LEARNER_PROFILE: 'studypilot_learner_profile_v1',
-  QUIZ_HISTORY: 'studypilot_quiz_history_v1',
-  CHAT_HISTORY: 'studypilot_chat_history_v1',
+  ACTIVE_COURSE: 'studypilot_active_course_v2',
+  TOPIC_MASTERY: 'studypilot_topic_mastery_v2',
+  LEARNER_PROFILE: 'studypilot_learner_profile_v2',
+  QUIZ_HISTORY: 'studypilot_quiz_history_v2',
+  CHAT_HISTORY: 'studypilot_chat_history_v2',
   THEME: 'studypilot_theme_v1',
   LANGUAGE: 'studypilot_language_v1',
 };
@@ -39,9 +34,9 @@ export function useAppStore() {
   const [course, setCourse] = useState<Course>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.ACTIVE_COURSE);
-      return stored ? JSON.parse(stored) : SAMPLE_COURSE;
+      return stored ? JSON.parse(stored) : INITIAL_COURSE;
     } catch {
-      return SAMPLE_COURSE;
+      return INITIAL_COURSE;
     }
   });
 
@@ -69,9 +64,9 @@ export function useAppStore() {
   const [quizHistory, setQuizHistory] = useState<QuizSubmission[]>(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEYS.QUIZ_HISTORY);
-      return stored ? JSON.parse(stored) : SAMPLE_PAST_QUIZZES;
+      return stored ? JSON.parse(stored) : [];
     } catch {
-      return SAMPLE_PAST_QUIZZES;
+      return [];
     }
   });
 
@@ -87,7 +82,7 @@ export function useAppStore() {
       {
         id: 'msg-welcome',
         role: 'assistant',
-        content: `Welcome to **StudyPilot**! I am your source-grounded academic study companion for **${SAMPLE_COURSE.title}**.\n\nEvery explanation I provide cites exact lecture video timestamps, slide slides, or textbook pages from your course materials. Ask me anything, or pick one of the suggested topics below!`,
+        content: 'Welcome to **StudyPilot**! Upload a textbook PDF, slide deck, lecture video, or a YouTube lecture with captions to build your own source-cited knowledge base. I will answer from your uploaded material and flag questions the sources do not cover.',
         timestamp: Date.now() - 3600000,
         suggested_follow_ups: [
           'Why does attention divide by sqrt(d_k)?',
@@ -187,28 +182,6 @@ export function useAppStore() {
     setIsDrawerOpen(false);
   }, []);
 
-  // Reset to Demo Mode
-  const resetToDemoMode = useCallback(() => {
-    setCourse(SAMPLE_COURSE);
-    setTopicMastery(INITIAL_TOPIC_MASTERY_STATES);
-    setLearnerProfile(INITIAL_LEARNER_PROFILE);
-    setQuizHistory(SAMPLE_PAST_QUIZZES);
-    setChatMessages([
-      {
-        id: 'msg-welcome-reset',
-        role: 'assistant',
-        content: `Demo Mode activated! Loaded **${SAMPLE_COURSE.title}** with 8 topics, 40+ content units with real textbook pages, slides, and video timestamps, plus realistic 30-day student progress.`,
-        timestamp: Date.now(),
-        suggested_follow_ups: [
-          'Why does attention divide by sqrt(d_k)?',
-          'How does Momentum prevent oscillations in ravines?',
-          'Explain the double descent phenomenon in deep networks',
-          'What is the receptive field formula for 2D convolutions?',
-        ],
-      },
-    ]);
-  }, []);
-
   // Update BKT Mastery after a quiz submission
   const applyQuizResultsToMastery = useCallback((submission: QuizSubmission) => {
     setTopicMastery(prevStates => {
@@ -280,19 +253,45 @@ export function useAppStore() {
   // Add new content unit from ingestion
   const addIngestedContent = useCallback((newUnits: typeof course.content_units, newTopics: typeof course.topics) => {
     setCourse(prev => {
-      // Merge unique topics
-      const existingTopicIds = new Set(prev.topics.map(t => t.id));
+      const existingTopicIds = new Set(prev.topics.map(topic => topic.id));
       const mergedTopics = [...prev.topics];
-      for (const t of newTopics) {
-        if (!existingTopicIds.has(t.id)) {
-          mergedTopics.push(t);
-        }
+      for (const topic of newTopics) {
+        if (!existingTopicIds.has(topic.id)) mergedTopics.push(topic);
       }
+      const existingUnitIds = new Set(prev.content_units.map(unit => unit.id));
+      const mergedUnits = [...prev.content_units];
+      for (const unit of newUnits) {
+        if (!existingUnitIds.has(unit.id)) mergedUnits.unshift(unit);
+      }
+      const isFirstIngestion = prev.content_units.length === 0;
       return {
         ...prev,
+        title: isFirstIngestion ? 'Uploaded Course Material' : prev.title,
+        institution: isFirstIngestion ? 'Your uploaded sources' : prev.institution,
+        description: isFirstIngestion ? 'Knowledge base built from your uploaded course sources.' : prev.description,
         topics: mergedTopics,
-        content_units: [...newUnits, ...prev.content_units],
+        content_units: mergedUnits,
       };
+    });
+
+    setTopicMastery(prev => {
+      const existingTopicIds = new Set(prev.map(state => state.topic_id));
+      const now = Date.now();
+      const newStates: TopicMasteryState[] = newTopics
+        .filter(topic => !existingTopicIds.has(topic.id))
+        .map(topic => ({
+          topic_id: topic.id,
+          mastery: 0.25,
+          confidence_interval: 0.25,
+          attempts_count: 0,
+          correct_count: 0,
+          last_practiced_timestamp: 0,
+          stability_days: 1,
+          retrievability: 1,
+          review_due_timestamp: now,
+          status: 'needs_review',
+        }));
+      return [...prev, ...newStates];
     });
   }, []);
 
@@ -318,7 +317,6 @@ export function useAppStore() {
     setIsArchModalOpen,
     isSearchModalOpen,
     setIsSearchModalOpen,
-    resetToDemoMode,
     applyQuizResultsToMastery,
     applyChatNudge,
     addIngestedContent,
